@@ -1,0 +1,49 @@
+# moat
+
+Uses Apple's native, open-source [`container`](https://github.com/apple/container) tool to isolate a Claude Code instance to a specific directory.
+
+Features:
+
+- Isolated: Claude can't access files outside the project it's working on.
+- Resumable: `.claude/` directories from inside the container are persisted individually in `$HOME/.moat`, so `moat`-protected sessions can be resumed without exposing your whole `$HOME/.claude`.
+- Shared context: the directory you choose is shared from your host machine to `container` using a volume mount, so changes in that directory are mirrored instantly.
+- Shared credentials: your `$HOME/.claude/.credentials.json` is shared with `container`, read-only, so your Claude session starts logged-in.
+- Shared CLAUDE.md: your `$HOME/.claude/CLAUDE.md` is shared with `container`, read-only, so your Claude session has your normal context.
+- Performant: `container` is optimized for Apple Silicon, and is much faster than VM tools like Docker.
+
+> [!WARNING]
+> `container` doesn't support network firewalling, so Claude Code in the VM will have full network access. Take care as to the contents of the directory you give to `moat`.
+
+## Installing
+
+Before running `moat` for the first time, you'll need to install some stuff.
+
+1. Install [`container` from Github Releases](https://github.com/apple/container/releases), using the `.pkg` installer.
+
+1. Install Rosetta. Required because something in the `container build` pipeline requires Rosetta installed, even if you're building for arm64.
+
+```sh
+softwareupdate --install-rosetta --agree-to-license
+```
+
+1. Run `container system start`. This will prompt you to install a default kernel.
+
+1. Build the `moat` container. From this directory:
+
+```sh
+container build -t moat:latest
+```
+
+## Usage
+
+```sh
+moat <path-to-repo> [--permission-mode <mode>] [--skills <dir>] [claude-args...]
+```
+
+`--permission-mode` passes through a Claude Code permission mode to the `claude` session that runs in `moat`. Defaults to `auto`.
+
+`--skills` points to a directory containing Claude skills that will be available inside `moat`.
+
+Trailing arguments are forwarded to `claude` inside the container.
+
+

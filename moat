@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""moat — run Claude Code in a sandboxed Apple `container` VM."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def resolve_git_common_dir(workspace: Path) -> Path | None:
+    """
+    Return the common .git/ directory to mount read-only for `workspace`, or
+    None if `workspace` isn't inside a git repo. This is the workspace's own
+    .git/ for a normal repo, or the original repo's shared .git/ for a worktree.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=workspace,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return Path(result.stdout.strip())
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="moat",
+        description="Runs Claude Code in a sandboxed VM with the given <workspace> directory mounted.",
+        epilog="Any additional arguments are forwarded to `claude` inside the container.",
+    )
+    parser.add_argument(
+        "workspace",
+        help="directory to mount as the workspace in the container",
+    )
+    parser.add_argument(
+        "--permission-mode",
+        default="auto",
+        help="Claude Code permission mode (default: auto)",
+    )
+    parser.add_argument(
+        "--skills",
+        metavar="DIR",
+        help="directory of Claude skills to mount read-only into the container",
+    )
+    args, claude_args = parser.parse_known_args()
+    permission_mode = args.permission_mode
+
+    workspace_arg = Path(args.workspace)
+    if not workspace_arg.is_dir():
+        print(f"moat: not a directory: {args.workspace}", file=sys.stderr)
+        return 1
+    workspace = workspace_arg.resolve()
+
+    skills_dir: Path | None = None
+    if args.skills is not None:
+        skills_arg = Path(args.skills)
+        if not skills_arg.is_dir():
+            print(f"moat: not a directory: {args.skills}", file=sys.stderr)
+            return 1
+        skills_dir = skills_arg.resolve()
+
+    host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    claude_md: Path | None = host_claude_md.resolve() if host_claude_md.is_file() else None
+
+    print(f"moat: run claude in \"{workspace_arg}\" with permission mode \"{permission_mode}\"?")
+    try:
+        answer = input("[y/n] ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return 1
+    if answer.strip().lower() != "y":
+        return 1
+
+    # Prepare a directory for moat to store state.
+    moat_dir = Path.home() / ".moat"
+    moat_dir.mkdir(parents=True, exist_ok=True)
+
+    # Because a Mac host can't easily share auth credentials with Claude in a
+    # VM because of how it uses the keychain (see: https://github.com/anthropics/claude-code/issues/1414),
+    # we'll store the in-VM auth credentials in ~/.moat so we can share them
+    # across moat sessions.
+    credentials_path = moat_dir / ".credentials.json"
+    credentials_path.touch(exist_ok=True)
+
+    # Prepare a per-workspace (keyed by a hash of the directory path) directory
+    # where we can save the ~/.claude directories from the VM durably on the
+    # host, under ~/.moat. We'll mount this into the VM, so Claude has context
+    # from and can resume previous sessions in this workspace.
+    workspace_hash = hashlib.sha256(str(workspace).encode()).hexdigest()[:16]
+    state_dir = moat_dir / workspace_hash
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    # We'll mount the workspace in the container at the same absolute path as on
+    # the host, and run Claude from there. We'll also mount the workspace's
+    # "common git dir" (either .git/, or if we're a worktree then the .git/ of
+    # the main worktree), read-only, at its absolute path as on the host.
+    #
+    # This ensures that git operations in the workspace work as the do on the
+    # host, without having to worry about the paths a worktree (or any
+    # submodules, or submodules in a worktree) might expect for .git contents.
+    #
+    # We mount the git-dir read-only so that all changes made inside the moat
+    # session are obvious from the host (no possibility for commits, ignoring,
+    # etc.).
+    git_dir = resolve_git_common_dir(workspace)
+
+    # Write a dummy .claude.json to disable first-run prompts. We'll store it in
+    # the state directory, then mount it into the container at ~/.claude.json.
+    claude_json_path = moat_dir / f"{workspace_hash}.claude.json"
+    claude_json_path.write_text(json.dumps({
+        "hasCompletedOnboarding": True,
+        "projects": {
+            str(workspace): {
+                "hasTrustDialogAccepted": True,
+            },
+        },
+    }))
+
+    # For debugging purposes, write a pointer from the workspace hash back to
+    # the workspace itself. This isn't mounted into the container.
+    workspace_hash_hint_path = moat_dir / f"{workspace_hash}.pointer"
+    workspace_hash_hint_path.write_text(str(workspace))
+
+    # If container's daemon isn't running yet, start it.
+    status = subprocess.run(
+        ["container", "system", "status"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if status.returncode != 0:
+        subprocess.run(["container", "system", "start"], check=True)
+
+    cmd = [
+        "container", "run", "-it", "--rm",
+        "--name", f"moat.{workspace.name}",
+        "--cpus", "2", "--memory", "4G",
+        "-v", f"{workspace}:{workspace}",
+        *(["-v", f"{git_dir}:{git_dir}:ro"] if git_dir else []),
+        "-v", f"{state_dir}:/home/robot/.claude",
+        "-v", f"{credentials_path}:/home/robot/.claude/.credentials.json",
+        "-v", f"{claude_json_path}:/home/robot/.claude.json",
+        *(["-v", f"{skills_dir}:/home/robot/.claude/skills:ro"] if skills_dir else []),
+        *(["-v", f"{claude_md}:/home/robot/.claude/CLAUDE.md:ro"] if claude_md else []),
+        "-u", "robot",
+        "-w", str(workspace),
+        "moat:latest",
+        "claude", "--permission-mode", permission_mode,
+        *claude_args,
+    ]
+    os.execvp(cmd[0], cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
