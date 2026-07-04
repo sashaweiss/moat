@@ -34,6 +34,11 @@ softwareupdate --install-rosetta --agree-to-license
 container build -t moat:latest
 ```
 
+> [!NOTE]
+> To update `moat`'s version of Claude Code, rebuild the container:
+>
+> `container build -t moat:latest --no-cache`
+
 ## Usage
 
 ```sh
