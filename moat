@@ -50,8 +50,15 @@ def main() -> int:
         metavar="DIR",
         help="directory of Claude skills to mount read-only into the container",
     )
+    parser.add_argument(
+        "--git-access-mode",
+        choices=["read", "write"],
+        default="read",
+        help="mount the git directory read-only or read-write (default: read)",
+    )
     args, claude_args = parser.parse_known_args()
     permission_mode = args.permission_mode
+    git_write = args.git_access_mode == "write"
 
     workspace_arg = Path(args.workspace)
     if not workspace_arg.is_dir():
@@ -71,6 +78,8 @@ def main() -> int:
     claude_md: Path | None = host_claude_md.resolve() if host_claude_md.is_file() else None
 
     print(f"moat: run claude in \"{workspace.name}\" with permission mode \"{permission_mode}\"?")
+    if git_write:
+        print("WARNING: claude will have write access to git!")
     try:
         answer = input("[y/n] ")
     except (EOFError, KeyboardInterrupt):
@@ -101,16 +110,19 @@ def main() -> int:
     # We'll mount the workspace in the container at the same absolute path as on
     # the host, and run Claude from there. We'll also mount the workspace's
     # "common git dir" (either .git/, or if we're a worktree then the .git/ of
-    # the main worktree), read-only, at its absolute path as on the host.
+    # the main worktree) at its absolute path as on the host.
     #
     # This ensures that git operations in the workspace work as the do on the
     # host, without having to worry about the paths a worktree (or any
     # submodules, or submodules in a worktree) might expect for .git contents.
-    #
-    # We mount the git-dir read-only so that all changes made inside the moat
-    # session are obvious from the host (no possibility for commits, ignoring,
-    # etc.).
     git_dir = resolve_git_common_dir(workspace)
+
+    # We mount the git dir read-only by default so that all changes made inside
+    # the moat session are obvious from the host (no possibility for commits,
+    # ignoring, etc.).
+    #
+    # However, if specifically requested we'll allow git dir write access.
+    git_mount_mode = "rw" if git_write else "ro"
 
     # Write a dummy .claude.json to disable first-run prompts. We'll store it in
     # the state directory, then mount it into the container at ~/.claude.json.
@@ -143,7 +155,7 @@ def main() -> int:
         "--name", f"moat.{workspace.name}",
         "--cpus", "2", "--memory", "4G",
         "-v", f"{workspace}:{workspace}",
-        *(["-v", f"{git_dir}:{git_dir}:ro"] if git_dir else []),
+        *(["-v", f"{git_dir}:{git_dir}:{git_mount_mode}"] if git_dir else []),
         "-v", f"{state_dir}:/home/robot/.claude",
         "-v", f"{credentials_path}:/home/robot/.claude/.credentials.json",
         "-v", f"{claude_json_path}:/home/robot/.claude.json",
