@@ -70,7 +70,7 @@ def main() -> int:
     host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
     claude_md: Path | None = host_claude_md.resolve() if host_claude_md.is_file() else None
 
-    print(f"moat: run claude in \"{workspace_arg}\" with permission mode \"{permission_mode}\"?")
+    print(f"moat: run claude in \"{workspace.name}\" with permission mode \"{permission_mode}\"?")
     try:
         answer = input("[y/n] ")
     except (EOFError, KeyboardInterrupt):
