@@ -14,6 +14,9 @@ Features:
 > [!WARNING]
 > `container` doesn't support network firewalling, so Claude Code in the VM will have full network access. Take care as to the contents of the directory you give to `moat`.
 
+> [!WARNING]
+> Claude Code has passwordless `sudo` inside the container so it can install whatever tools it needs. Note that VM instances are transient (run with `--rm`), so tool installs don't persist across `moat` sessions.
+
 ## Installing
 
 Before running `moat` for the first time, you'll need to install some stuff.
