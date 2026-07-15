@@ -132,6 +132,7 @@ def main() -> int:
         claude_json_path.write_text(json.dumps({
             "hasCompletedOnboarding": True,
             "hasSeenAutoModeEntryWarning": True,
+            "spinnerTipsEnabled": False,
             "projects": {
                 str(workspace): {
                     "hasTrustDialogAccepted": True,
