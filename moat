@@ -124,17 +124,20 @@ def main() -> int:
     # However, if specifically requested we'll allow git dir write access.
     git_mount_mode = "rw" if git_write else "ro"
 
-    # Write a dummy .claude.json to disable first-run prompts. We'll store it in
-    # the state directory, then mount it into the container at ~/.claude.json.
+    # For first-time workspaces, write a dummy .claude.json to populate some
+    # default settings (silence FRE prompts). We'll store it in the state
+    # directory, then mount it into the container at ~/.claude.json.
     claude_json_path = moat_dir / f"{workspace_hash}.claude.json"
-    claude_json_path.write_text(json.dumps({
-        "hasCompletedOnboarding": True,
-        "projects": {
-            str(workspace): {
-                "hasTrustDialogAccepted": True,
+    if not claude_json_path.exists():
+        claude_json_path.write_text(json.dumps({
+            "hasCompletedOnboarding": True,
+            "hasSeenAutoModeEntryWarning": True,
+            "projects": {
+                str(workspace): {
+                    "hasTrustDialogAccepted": True,
+                },
             },
-        },
-    }))
+        }))
 
     # For debugging purposes, write a pointer from the workspace hash back to
     # the workspace itself. This isn't mounted into the container.
