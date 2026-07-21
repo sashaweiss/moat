@@ -45,12 +45,20 @@ container build -t moat:latest
 ## Usage
 
 ```sh
-moat <path-to-repo> [--permission-mode <mode>] [--skills <dir>] [claude-args...]
+moat <path-to-repo> [--permission-mode <mode>] [--skills <dir>] [--env-file <path>] [claude-args...]
 ```
 
 `--permission-mode` passes through a Claude Code permission mode to the `claude` session that runs in `moat`. Defaults to `auto`.
 
 `--skills` points to a directory containing Claude skills that will be available inside `moat`.
+
+`--env-file` points to a `KEY=VALUE` file whose contents are injected as environment variables inside the container. Use this to inject secrets to Claude, such as API tokens.
+
+```sh
+echo 'MY_TOKEN=lalalala' > "$HOME/.moat/tokens.env"
+chmod 600 "$HOME/.moat/tokens.env"
+moat <path-to-repo> --env-file "$HOME/.moat/tokens.env"
+```
 
 Trailing arguments are forwarded to `claude` inside the container.
 

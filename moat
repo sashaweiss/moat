@@ -56,6 +56,11 @@ def main() -> int:
         default="read",
         help="mount the git directory read-only or read-write (default: read)",
     )
+    parser.add_argument(
+        "--env-file",
+        metavar="PATH",
+        help="file of KEY=VALUE secrets to inject as environment variables"
+    )
     args, claude_args = parser.parse_known_args()
     permission_mode = args.permission_mode
     git_write = args.git_access_mode == "write"
@@ -73,6 +78,14 @@ def main() -> int:
             print(f"moat: not a directory: {args.skills}", file=sys.stderr)
             return 1
         skills_dir = skills_arg.resolve()
+
+    env_file: Path | None = None
+    if args.env_file is not None:
+        env_file_arg = Path(args.env_file)
+        if not env_file_arg.is_file():
+            print(f"moat: not a file: {args.env_file}", file=sys.stderr)
+            return 1
+        env_file = env_file_arg.resolve()
 
     host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
     claude_md: Path | None = host_claude_md.resolve() if host_claude_md.is_file() else None
@@ -165,6 +178,7 @@ def main() -> int:
         "-v", f"{claude_json_path}:/home/robot/.claude.json",
         *(["-v", f"{skills_dir}:/home/robot/.claude/skills:ro"] if skills_dir else []),
         *(["-v", f"{claude_md}:/home/robot/.claude/CLAUDE.md:ro"] if claude_md else []),
+        *(["--env-file", str(env_file)] if env_file else []),
         "-u", "robot",
         "-w", str(workspace),
         "moat:latest",
