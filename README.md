@@ -7,7 +7,7 @@ Features:
 - Isolated: Claude can't access files outside the project it's working on.
 - Resumable: `.claude/` directories from inside the container are persisted individually in `$HOME/.moat`, so `moat`-protected sessions can be resumed without exposing your whole `$HOME/.claude`.
 - Shared context: the directory you choose is shared from your host machine to `container` using a volume mount, so changes in that directory are mirrored instantly.
-- Shared credentials: your `$HOME/.claude/.credentials.json` is shared with `container`, read-only, so your Claude session starts logged-in.
+- Persistent credentials: once you log into Claude in `moat`, it stores your credentials in `$HOME/.moat` and shares those credentials across sessions so you stay logged in.
 - Shared CLAUDE.md: your `$HOME/.claude/CLAUDE.md` is shared with `container`, read-only, so your Claude session has your normal context.
 - Performant: `container` is optimized for Apple Silicon, and is much faster than VM tools like Docker.
 
