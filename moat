@@ -61,9 +61,15 @@ def main() -> int:
         metavar="PATH",
         help="file of KEY=VALUE secrets to inject as environment variables"
     )
+    parser.add_argument(
+        "--model",
+        default="opus",
+        help="Claude model for the session; defaults to the latest Opus (default: opus)",
+    )
     args, claude_args = parser.parse_known_args()
     permission_mode = args.permission_mode
     git_write = args.git_access_mode == "write"
+    model = args.model
 
     workspace_arg = Path(args.workspace)
     if not workspace_arg.is_dir():
@@ -182,7 +188,9 @@ def main() -> int:
         "-u", "robot",
         "-w", str(workspace),
         "moat:latest",
-        "claude", "--permission-mode", permission_mode,
+        "claude",
+        "--permission-mode", permission_mode,
+        "--model", model,
         *claude_args,
     ]
     os.execvp(cmd[0], cmd)
