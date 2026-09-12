@@ -1,0 +1,1291 @@
+#!/usr/bin/env python3
+"""Runs agents inside macOS VMs (via tart), sharing output with the host as validated git patches."""
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import unicodedata
+from datetime import datetime, timezone
+from pathlib import Path
+
+MOAT_HOME = Path(os.environ.get("MOAT_MAC_HOME", Path.home() / ".moat-mac"))
+BASE_VM = "moat-mac-base"
+BASE_IMAGE = "ghcr.io/cirruslabs/macos-tahoe-xcode:latest"
+BASE_CPU = 6
+BASE_MEMORY_MB = 12288
+VM_PREFIX = "moat-mac-"
+MAILBOX_TAG = "moatmail"
+GUEST_MAILBOX = "~/mailbox"
+GUEST_WORK = "~/work"
+
+# We install Claude Code ourselves; the image also ships a Homebrew claude.
+# Absolute path: this goes through shlex.quote, which defeats ~ expansion.
+GUEST_CLAUDE = "/Users/admin/.local/bin/claude"
+
+PATCH_RE = re.compile(r"^(\d{4})\.patch$")
+BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+MBOX_FROM_RE = re.compile(r"^From [0-9a-f]{40} ", re.M)
+MAX_PATCH_BYTES = 10 * 1024 * 1024
+
+
+def log(msg, file=sys.stdout):
+    """Print a message. Extra lines emit indented under the first."""
+    first, *rest = msg.split("\n")
+    print(f"moat-mac: {first}", file=file)
+    for line in rest:
+        print(f"moat-mac:   {line}", file=file)
+
+
+def warn(msg):
+    """Print an error. Extra lines emit indented under the first."""
+    log(f"error: {msg}", file=sys.stderr)
+
+
+def die(msg, code=1):
+    """Like warn, but exits."""
+    warn(msg)
+    sys.exit(code)
+
+
+def confirm(prompt):
+    """Ask for a y/n. Extra lines emit indented under the first."""
+    log(prompt)
+    try:
+        answer = input("[y/n] ")
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() != "y":
+        sys.exit(1)
+
+
+# MARK: - tart
+
+def tart(*args, **kwargs):
+    return subprocess.run(["tart", *args], **kwargs)
+
+
+def tart_list():
+    out = tart(
+        "list", "--source", "local", "--format", "json",
+        stdout=subprocess.PIPE, text=True, check=True,
+    )
+    return json.loads(out.stdout or "[]")
+
+
+def vm_exists(name):
+    return any(vm["Name"] == name for vm in tart_list())
+
+
+def vm_running(name):
+    return any(vm["Name"] == name for vm in tart_list() if vm.get("Running"))
+
+
+def vm_allocated_gb(vm):
+    """A VM's allocated size in GB, from `tart get` (3-decimal precision)."""
+    out = tart("get", vm, "--format", "json", capture_output=True, text=True)
+    if out.returncode != 0:
+        return None
+    try:
+        return float(json.loads(out.stdout)["Size"])
+    except (ValueError, KeyError):
+        return None
+
+
+def vm_growth_gb(vm, base_gb):
+    """GB a VM has grown since it was cloned: its allocated size, less the
+    base image's. APFS copy-on-write means a fresh clone starts equal to
+    its base, so the difference is what this VM alone has written."""
+    allocated = vm_allocated_gb(vm)
+    if allocated is None:
+        return None
+    if base_gb is None:
+        return allocated
+    return max(allocated - base_gb, 0.0)
+
+
+def guest(vm, script, **kwargs):
+    """Run a command in the VM as admin, in a login shell."""
+    return subprocess.run(["tart", "exec", vm, "/bin/zsh", "-lc", script], **kwargs)
+
+
+def wait_for_guest(vm, boot_proc):
+    while True:
+        ready = guest(vm, "true", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if ready.returncode == 0:
+            return
+        if boot_proc.poll() is not None:
+            die("tart run exited before the guest came up")
+        time.sleep(2)
+
+
+def stop_vm(vm):
+    """Stop a VM, quieting tart's chatter but surfacing failures.
+    Returns True on success."""
+    stop = tart("stop", vm, capture_output=True, text=True)
+    if stop.returncode != 0:
+        warn(f"could not stop VM {vm}\n"
+             + (stop.stderr.strip().split("\n")[0] if stop.stderr else "tart stop failed"))
+        return False
+    return True
+
+
+def boot_vm(s):
+    """Start the session VM with its mailbox mounted. Returns the process."""
+    boot = subprocess.Popen(
+        ["tart", "run", s.vm, "--no-graphics",
+         "--dir", f"{s.mailbox}:tag={MAILBOX_TAG}"],
+        stdin=subprocess.DEVNULL,
+    )
+    wait_for_guest(s.vm, boot)
+    guest(
+        s.vm,
+        f"mkdir -p {GUEST_MAILBOX} && sudo mount_virtiofs {MAILBOX_TAG} {GUEST_MAILBOX}",
+        check=True,
+    )
+    return boot
+
+
+# MARK: - Sessions
+
+class Session:
+    def __init__(self, name):
+        self.name = name
+        self.dir = MOAT_HOME / name
+        self.mailbox = self.dir / "mailbox"
+        self.history = self.dir / "history"
+        self.meta_path = self.dir / "session.json"
+        self.vm = VM_PREFIX + name
+
+    @property
+    def exists(self):
+        return self.meta_path.is_file()
+
+    def load(self):
+        return json.loads(self.meta_path.read_text())
+
+    def save(self, meta):
+        self.meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+
+    @property
+    def branches_dir(self):
+        return self.mailbox / "branches"
+
+    @property
+    def from_host_dir(self):
+        return self.mailbox / "from-host"
+
+    @property
+    def shared_dir(self):
+        return self.mailbox / "shared"
+
+    def published_branches(self):
+        """Validly-named, non-symlink branch directories in the mailbox."""
+        found = []
+        if not self.branches_dir.is_dir():
+            return found
+        for entry in sorted(os.scandir(self.branches_dir), key=lambda e: e.name):
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+            name = entry.name
+            if BRANCH_RE.match(name) and ".." not in name and not name.endswith(".lock"):
+                found.append(name)
+        return found
+
+
+def sessions_for_cwd():
+    """Sessions whose repo contains the current directory."""
+    cwd = Path.cwd().resolve()
+    matches = []
+    best_repo = None
+    for s in all_sessions():
+        repo = Path(s.load()["repo"])
+        if cwd != repo and repo not in cwd.parents:
+            continue
+        # Prefer the innermost repo (worktrees nested under other repos).
+        if best_repo is None or len(str(repo)) > len(str(best_repo)):
+            matches, best_repo = [s], repo
+        elif repo == best_repo:
+            matches.append(s)
+    return matches
+
+
+def resolve_session(name):
+    """Session from the argument, or from the current directory."""
+    if name is not None:
+        return load_session(name)
+    matches = sessions_for_cwd()
+    if not matches:
+        die("no session for the current directory\n"
+            "pass --session (see: moat-mac list)")
+    if len(matches) > 1:
+        names = ", ".join(s.name for s in matches)
+        die(f"multiple sessions for the current directory ({names})\n"
+            "pass --session to pick one")
+    return matches[0]
+
+
+def load_session(name):
+    s = Session(name)
+    if not s.exists:
+        die(f'no session named "{name}" (see: moat-mac list)')
+    return s
+
+
+def all_sessions():
+    if not MOAT_HOME.is_dir():
+        return []
+    return sorted(
+        (Session(p.name) for p in MOAT_HOME.iterdir() if (p / "session.json").is_file()),
+        key=lambda s: s.name,
+    )
+
+
+# MARK: - Patch validation
+
+# Any Unicode text, except the "Other" (C*) categories: controls, which can
+# drive a terminal; format characters, including bidi controls and invisible
+# text, which can disguise code; and private-use or unassigned characters.
+ALLOWED_CHARS = {
+    "\n", "\t",
+    "\u200d",  # Zero-width joiner, for emoji sequences
+}
+
+
+def disallowed_char(text):
+    """Return the index of the first disallowed character, or None."""
+    for i, ch in enumerate(text):
+        if ch not in ALLOWED_CHARS and unicodedata.category(ch).startswith("C"):
+            return i
+    return None
+
+
+# No binary files allowed, period.
+BINARY_MARKERS = (
+    re.compile(r"^GIT binary patch", re.M),
+    re.compile(r"^Binary files .* differ$", re.M),
+)
+
+
+def validate_patch_text(text):
+    """Raise ValueError unless text is a plain-text, binary-free patch."""
+    i = disallowed_char(text)
+    if i is not None:
+        raise ValueError(f"disallowed character U+{ord(text[i]):04X} at offset {i}")
+    for marker in BINARY_MARKERS:
+        if marker.search(text):
+            raise ValueError("contains a binary file change")
+
+
+def validate_patch_file(path):
+    """Validate a mailbox patch before its content is used for anything.
+
+    Returns the decoded text; raises ValueError with a reason otherwise.
+    """
+    st = os.lstat(path)
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError("not a regular file (symlinks refused)")
+    if st.st_uid != os.getuid():
+        raise ValueError(f"unexpected owner uid {st.st_uid}")
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise ValueError("group- or world-writable")
+    if st.st_size == 0:
+        raise ValueError("empty file")
+    if st.st_size > MAX_PATCH_BYTES:
+        raise ValueError(f"too large ({st.st_size} bytes > {MAX_PATCH_BYTES})")
+
+    data = Path(path).read_bytes()
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"not valid UTF-8: {e}")
+
+    validate_patch_text(text)
+    return text
+
+
+# MARK: - Patch series
+
+def split_series(text):
+    """Split format-patch --stdout output into [(subject, section), ...]."""
+    starts = [m.start() for m in MBOX_FROM_RE.finditer(text)]
+    if not starts:
+        raise ValueError("not in git format-patch (mbox) format")
+    commits = []
+    for i, start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(text)
+        section = text[start:end]
+        m = re.search(r"^Subject: (?:\[PATCH[^\]]*\] )?(.*)$", section, re.M)
+        commits.append((m.group(1) if m else "(no subject)", section))
+    return commits
+
+
+def git_out(repo, *args, **kwargs):
+    """Run git in repo, returning stripped stdout (checked)."""
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        stdout=subprocess.PIPE, text=True, check=True, **kwargs,
+    ).stdout.strip()
+
+
+def patch_id(repo, diff_text):
+    """Stable identity of a change, independent of sha/committer/dates."""
+    out = subprocess.run(
+        ["git", "-C", str(repo), "patch-id", "--stable"],
+        input=diff_text, stdout=subprocess.PIPE, text=True, check=True,
+    ).stdout.split()
+    return out[0] if out else None
+
+
+def read_parent(s, branch):
+    """What this branch builds on: (parent, fork), or None for the session
+    base. `fork` counts the parent's commits this branch is based on.
+
+    Raises ValueError if the PARENT file is unusable.
+    """
+    return parse_parent_file(s.branches_dir / branch / "PARENT", branch)
+
+
+def parse_parent_file(path, branch):
+    """Parse a PARENT file: a branch name, then its fork count."""
+    if not path.is_file():
+        return None
+    st = os.lstat(path)
+    if not stat.S_ISREG(st.st_mode):
+        raise ValueError("PARENT is not a regular file")
+    if st.st_size > 256:
+        raise ValueError("PARENT is too large")
+    lines = path.read_bytes().decode("utf-8", errors="replace").split("\n")
+    name = lines[0].strip()
+    if not BRANCH_RE.match(name) or ".." in name or name.endswith(".lock"):
+        raise ValueError(f"PARENT names an invalid branch ({name!r})")
+    if name == branch:
+        raise ValueError("PARENT names the branch itself")
+    fork = lines[1].strip() if len(lines) > 1 else ""
+    if not fork:
+        return (name, None)
+    if not fork.isdigit() or int(fork) < 1:
+        raise ValueError(f"PARENT has an invalid fork count ({fork!r})")
+    return (name, int(fork))
+
+
+def order_branches(s, branches):
+    """Order branches parents-first. Returns (parents, ordered, skipped),
+    where skipped is [(branch, reason)]."""
+    published = set(branches)
+    parents, skipped = {}, []
+    for b in branches:
+        try:
+            parents[b] = read_parent(s, b)
+        except ValueError as e:
+            skipped.append((b, str(e)))
+    for b in sorted(parents):
+        parent = parents[b]
+        if parent is not None and parent[0] not in published:
+            skipped.append((b, f'its parent "{parent[0]}" is not published'))
+            del parents[b]
+
+    ordered = []
+    while True:
+        ready = [b for b in sorted(parents)
+                 if b not in ordered
+                 and (parents[b] is None or parents[b][0] in ordered)]
+        if not ready:
+            break
+        ordered.extend(ready)
+    for b in sorted(parents):
+        if b not in ordered:
+            skipped.append((b, "its parent could not be resolved"))
+    return parents, ordered, skipped
+
+
+def branch_tree(parents, ordered, skipped, prefix=""):
+    """Lines drawing the branch tree, children indented under their parent."""
+    children = {}
+    for branch in ordered:
+        parent = parents[branch]
+        children.setdefault(parent[0] if parent else None, []).append(branch)
+
+    lines = []
+
+    def walk(parent, depth):
+        for branch in children.get(parent, []):
+            lines.append("  " * depth + f"- {prefix}{branch}")
+            walk(branch, depth + 1)
+
+    walk(None, 0)
+    for branch, reason in skipped:
+        lines.append(f"- {prefix}{branch} (skipped: {reason})")
+    return lines
+
+
+def branch_chain(s, branch):
+    """A branch and its ancestors, ancestors first."""
+    chain, seen = [], set()
+    current = branch
+    while current is not None and current not in seen:
+        seen.add(current)
+        chain.append(current)
+        try:
+            parent = read_parent(s, current)
+        except ValueError:
+            break
+        current = parent[0] if parent else None
+    return list(reversed(chain))
+
+
+def read_series(s, branch):
+    """Read and validate a published branch's patch series from the mailbox.
+
+    Returns [(subject, section), ...]; raises ValueError with a reason.
+    """
+    branch_dir = s.branches_dir / branch
+    numbered = {}
+    for path in branch_dir.iterdir():
+        m = PATCH_RE.match(path.name)
+        if m:
+            numbered[int(m.group(1))] = path
+    if not numbered:
+        raise ValueError("no patches")
+    expected = list(range(1, len(numbered) + 1))
+    if sorted(numbered) != expected:
+        raise ValueError(f"patch numbering has gaps ({len(numbered)} files)")
+
+    series = []
+    for n in expected:
+        text = validate_patch_file(numbered[n])
+        commits = split_series(text)
+        if len(commits) != 1:
+            raise ValueError(f"{numbered[n].name} contains {len(commits)} "
+                             "commits; expected exactly one")
+        series.append(commits[0])
+    return series
+
+
+# MARK: - Commands
+
+def bundle_repo(repo, branch, tar_path, verbose=False):
+    """Pack a fresh single-branch clone of repo@branch, submodules populated
+    from the source's local checkouts where possible (no network). Returns
+    the tarball's sha256.
+    """
+    quiet = [] if verbose else ["--quiet"]
+    with tempfile.TemporaryDirectory(prefix="moat-mac-bundle-") as tmp:
+        clone_dir = Path(tmp) / repo.name
+        subprocess.run(
+            ["git", "clone", *quiet, "--single-branch", "--branch", branch,
+             str(repo), str(clone_dir)],
+            check=True,
+        )
+        gitmodules = clone_dir / ".gitmodules"
+        if gitmodules.is_file():
+            git = ["git", "-C", str(clone_dir)]
+            subprocess.run([*git, "submodule", *quiet, "init"], check=True)
+            entries = subprocess.run(
+                ["git", "config", "--file", str(gitmodules),
+                 "--get-regexp", r"^submodule\..*\.path$"],
+                stdout=subprocess.PIPE, text=True, check=True,
+            ).stdout
+            for line in entries.splitlines():
+                key, sm_path = line.split(" ", 1)
+                name = key[len("submodule."):-len(".path")]
+                source = repo / sm_path
+                if (source / ".git").exists():
+                    subprocess.run(
+                        [*git, "config", f"submodule.{name}.url", str(source)],
+                        check=True,
+                    )
+            subprocess.run(
+                [*git, "-c", "protocol.file.allow=always",
+                 "submodule", *quiet, "update", "--init", "--recursive"],
+                check=True,
+            )
+            subprocess.run(
+                [*git, "submodule", *quiet, "sync", "--recursive"],
+                check=True,
+            )
+
+        # Uncompressed: the tarball only travels disk-to-disk, and gzip
+        # dominates packing time on multi-GB repos.
+        pack = subprocess.Popen(["tar", "-cf", str(tar_path), "-C", tmp, repo.name])
+        while pack.poll() is None:
+            time.sleep(2)
+            size = tar_path.stat().st_size if tar_path.exists() else 0
+            print("\rmoat-mac: packing repo bundle from temp dir into the mailbox... "
+                  f"{size // (1024 * 1024)} MB", end="", flush=True)
+        print()
+        if pack.returncode != 0:
+            die("tar failed while packing the repo bundle")
+    sha = hashlib.sha256()
+    with open(tar_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def require_base_vm():
+    """Every session VM is cloned from the base image."""
+    if not vm_exists(BASE_VM):
+        die(f'base image "{BASE_VM}" is not installed\n'
+            "install it with: moat-mac setup")
+
+
+def cmd_setup(args):
+    if vm_exists(BASE_VM):
+        print(f'moat-mac: base image "{BASE_VM}" is already installed')
+        return
+
+    confirm(f"build the {BASE_VM} image?\n"
+            f"- clones {BASE_IMAGE}\n"
+            "- installs Claude Code into it\n"
+            "**downloads ~25GB, and the finished VM needs ~80GB of disk**")
+
+    print(f"moat-mac: cloning {BASE_IMAGE} -> {BASE_VM}")
+    tart("clone", BASE_IMAGE, BASE_VM, check=True)
+    tart("set", BASE_VM, "--cpu", str(args.cpu), "--memory", str(args.memory),
+         check=True)
+
+    print(f"moat-mac: booting VM {BASE_VM} for setup")
+    boot = subprocess.Popen(
+        ["tart", "run", BASE_VM, "--no-graphics"], stdin=subprocess.DEVNULL,
+    )
+    try:
+        wait_for_guest(BASE_VM, boot)
+        # Set PATH before installing, so the installer doesn't complain
+        # about ~/.local/bin not being on it.
+        print(f"moat-mac: VM configuring PATH")
+        guest(BASE_VM,
+              "echo 'export PATH=\"$HOME/.local/bin:$PATH\"' >> ~/.zprofile",
+              check=True)
+        print("moat-mac: VM installing latest Claude Code")
+        guest(BASE_VM, "curl -fsSL https://claude.ai/install.sh | bash", check=True)
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        log(f'interrupted\nVM "{BASE_VM}" is **incomplete**\n'
+            f"delete it and retry with: tart delete {BASE_VM}", file=sys.stderr)
+        raise SystemExit(130)
+    except subprocess.CalledProcessError:
+        die(f'setup failed\nVM "{BASE_VM}" is **incomplete**\n'
+            f"delete it and retry with: tart delete {BASE_VM}")
+    finally:
+        print(f"moat-mac: stopping VM {BASE_VM}")
+        stop_vm(BASE_VM)
+        boot.wait()
+
+    log(f'base image "{BASE_VM}" ready\n'
+        "create a session with: moat-mac create\n"
+        "each new session needs a /login in claude on first start")
+
+
+def cmd_create(args):
+    repo = Path(args.repo).resolve()
+    if not (repo / ".git").exists():
+        die(f"{repo} is not a git repository")
+    name = args.name or repo.name
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name):
+        die(f'invalid session name "{name}"')
+
+    s = Session(name)
+    if s.exists:
+        die(f'session "{name}" already exists\n'
+            "create another session for this repo with: moat-mac create --name NAME")
+    if vm_exists(s.vm):
+        die(f'VM "{s.vm}" already exists\ndelete it first with: tart delete {s.vm}')
+    require_base_vm()
+
+    current = git_out(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    if current == "HEAD":
+        die("repo is on a detached HEAD\ncheck out a branch first")
+    base_commit = git_out(repo, "rev-parse", "HEAD")
+
+    # Both sides work on moat-mac/<session>/<branch>, so the session starts
+    # from such a branch: reuse it if we are on one, else make it here.
+    prefix = f"moat-mac/{name}/"
+    if current.startswith(prefix):
+        branch, session_ref, existing_ref = current[len(prefix):], current, True
+    else:
+        branch = re.sub(r"[^A-Za-z0-9._-]+", "-", current).strip("-.")
+        if not branch:
+            die(f'cannot make a session branch name from "{current}"')
+        session_ref = prefix + branch
+        existing_ref = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", session_ref],
+            stdout=subprocess.DEVNULL,
+        ).returncode == 0
+    if not BRANCH_RE.match(branch):
+        die(f'cannot make a session branch name from "{current}"')
+    if existing_ref:
+        base_commit = git_out(repo, "rev-parse", session_ref)
+        ref_line = f'- uses existing branch "{session_ref}"'
+    else:
+        ref_line = f'- creates branch "{session_ref}" from {current}'
+
+    confirm(
+        f'create session "{name}"?\n'
+        f"{ref_line}\n"
+        f'- clones VM "{BASE_VM}" -> "{s.vm}"\n'
+        f"- seeds it with a single-branch clone of {repo} @ {session_ref} "
+        f"({base_commit[:10]})\n"
+        "**only files tracked by git on that branch will be included**"
+    )
+
+    s.mailbox.mkdir(parents=True)
+    s.history.mkdir()
+    s.save({
+        "name": name,
+        "repo": str(repo),
+        "repo_name": repo.name,
+        "branch": branch,
+        "base_commit": base_commit,
+        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    })
+    s.branches_dir.mkdir()
+    s.from_host_dir.mkdir()
+    s.shared_dir.mkdir()
+
+    if not existing_ref:
+        made = subprocess.run(
+            ["git", "-C", str(repo), "branch", session_ref, base_commit],
+            capture_output=True, text=True,
+        )
+        if made.returncode != 0:
+            die(f'could not create branch "{session_ref}"\n'
+                + (made.stderr.strip().split("\n")[0] if made.stderr
+                   else "git branch failed"))
+        print(f'moat-mac: created branch "{session_ref}" at {base_commit[:10]}')
+
+    print(f"moat-mac: cloning {repo} to a temp dir (with submodules)")
+    bundle_sha = bundle_repo(repo, session_ref, s.mailbox / "repo.tar", args.verbose)
+
+    print(f"moat-mac: cloning VM {BASE_VM} -> {s.vm} (APFS copy-on-write)")
+    tart("clone", BASE_VM, s.vm, check=True)
+
+    # Provisioning also goes over the mailbox: it's the only channel in.
+    provision = s.mailbox / ".provision"
+    provision.mkdir()
+    here = Path(__file__).resolve().parent
+    shutil.copy(here / "guest" / "moat-publish", provision / "moat-publish")
+    shutil.copy(here / "guest" / "moat-fetch", provision / "moat-fetch")
+    shutil.copy(here / "guest" / "guest-setup.sh", provision / "guest-setup.sh")
+    (provision / "config.json").write_text(json.dumps({
+        "session": name,
+        "repo_name": repo.name,
+        "base_commit": base_commit,
+        "branch": branch,
+        "bundle_sha256": bundle_sha,
+    }, indent=2) + "\n")
+    claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    if claude_md.is_file():
+        shutil.copy(claude_md, provision / "CLAUDE.md")
+
+    print(f"moat-mac: booting VM {s.vm} for setup")
+    boot = None
+    try:
+        boot = boot_vm(s)
+        print("moat-mac: VM running guest setup")
+        guest(s.vm, f"zsh {GUEST_MAILBOX}/.provision/guest-setup.sh", check=True)
+        # Don't trust the exec channel's exit status alone: verify, host-side,
+        # the marker guest-setup writes as its final act.
+        if not (provision / ".complete").is_file():
+            die("guest setup did not finish (no completion marker)\n"
+                f'session "{name}" is **incomplete**\n'
+                f"clean up and retry with: moat-mac delete --session {name}")
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        log(f'interrupted\nsession "{name}" is **incomplete**\n'
+            f"clean up and retry with: moat-mac delete --session {name}", file=sys.stderr)
+        raise SystemExit(130)
+    except subprocess.CalledProcessError:
+        die(f'guest setup failed\nsession "{name}" is **incomplete**\n'
+            f"clean up and retry with: moat-mac delete --session {name}")
+    finally:
+        print(f"moat-mac: stopping VM {s.vm}")
+        stop_vm(s.vm)
+        if boot is not None:
+            boot.wait()
+        shutil.rmtree(provision, ignore_errors=True)
+        (s.mailbox / "repo.tar").unlink(missing_ok=True)
+
+    log(f'session "{name}" ready\nstart it with: moat-mac start --session {name}')
+
+
+def cmd_start(args):
+    s = resolve_session(args.session)
+    require_base_vm()
+    if not vm_exists(s.vm):
+        die(f'VM "{s.vm}" is missing (was it deleted?)')
+    if vm_running(s.vm):
+        die(f"{s.vm} is already running\nshell in with: moat-mac shell --session {s.name}")
+
+    meta = s.load()
+    repo_name = meta["repo_name"]
+
+    if args.no_claude:
+        confirm(f'start session "{s.name}"?\n'
+                f"- boots VM {s.vm}\n"
+                "- leaves claude unstarted")
+    else:
+        confirm(f'start session "{s.name}"?\n'
+                f"- boots VM {s.vm}\n"
+                f'- runs claude with permission mode "{args.permission_mode}"')
+    print(f"moat-mac: booting VM {s.vm}")
+    boot = None
+    try:
+        boot = boot_vm(s)
+
+        # Guest CLAUDE.md = host global CLAUDE.md + the environment addendum
+        # (guest/CLAUDE-addendum.md).
+        here = Path(__file__).resolve().parent
+        intro = (here / "guest" / "CLAUDE-addendum.md").read_text().format(
+            session=s.name,
+            repo_name=repo_name,
+            branch=meta["branch"],
+            base_commit=meta["base_commit"],
+        )
+        claude_md = Path.home() / ".claude" / "CLAUDE.md"
+        content = (claude_md.read_text() + "\n\n" if claude_md.is_file() else "") + intro
+        guest(
+            s.vm,
+            f"mkdir -p ~/.claude && printf '%s' {shlex.quote(content)} > ~/.claude/CLAUDE.md",
+            check=True,
+        )
+
+        # The agent must be able to commit; give it a git identity if the VM
+        # has none.
+        guest(
+            s.vm,
+            "git config --global user.email >/dev/null 2>&1 || "
+            "(git config --global user.name 'Claude (moat-mac)' && "
+            "git config --global user.email 'claude@moat-mac.invalid')",
+            check=True,
+        )
+
+        # Seed first-run Claude settings (guest/claude-settings.json, via
+        # guest/seed-claude-settings.py) and learn the VM's login state.
+        seed = (here / "guest" / "seed-claude-settings.py").read_text()
+        seed_settings = (here / "guest" / "claude-settings.json").read_text()
+        seeded = guest(
+            s.vm,
+            f"python3 - {shlex.quote(repo_name)} {shlex.quote(seed_settings)} "
+            f"<< 'PYEOF'\n{seed}\nPYEOF",
+            stdout=subprocess.PIPE, text=True, check=True,
+        )
+        needs_login = "logged-out" in seeded.stdout
+
+        if args.no_claude:
+            log(f"VM up\nshell in with: moat-mac shell --session {s.name}\n"
+                f"stop with: moat-mac stop --session {s.name}")
+            boot.wait()
+            return
+
+        if needs_login:
+            log("this VM is not logged into Claude\n"
+                "claude will open its /login flow\n"
+                "complete the login before working")
+        # A session maps 1:1 to a claude conversation: once the VM has a
+        # login (so a conversation exists), pick that conversation back up.
+        claude = [
+            GUEST_CLAUDE,
+            "--permission-mode", args.permission_mode,
+            "--model", args.model,
+            *(["--continue"] if not needs_login else []),
+            *args.claude_args,
+            *(["/login"] if needs_login else []),
+        ]
+        subprocess.run([
+            "tart", "exec", "-it", s.vm, "/bin/zsh", "-lc",
+            f"cd {GUEST_WORK}/{shlex.quote(repo_name)} && exec " + " ".join(map(shlex.quote, claude)),
+        ])
+    finally:
+        print(f"moat-mac: stopping VM {s.vm}")
+        stop_vm(s.vm)
+        if boot is not None:
+            boot.wait()
+
+
+def cmd_stop(args):
+    s = resolve_session(args.session)
+    confirm(f"stop VM {s.vm}?")
+    if not stop_vm(s.vm):
+        sys.exit(1)
+    print(f"moat-mac: stopped VM {s.vm}")
+
+
+def cmd_shell(args):
+    s = resolve_session(args.session)
+    if not vm_running(s.vm):
+        die(f"{s.vm} is not running\n"
+            f"boot it first with: moat-mac start --session {s.name} --no-claude")
+    confirm(f"open a shell in running VM {s.vm}?")
+    subprocess.run(["tart", "exec", "-it", s.vm, "/bin/zsh", "-l"])
+
+
+def cmd_list(args):
+    vms = {vm["Name"]: vm for vm in tart_list()}
+    base_gb = vm_allocated_gb(BASE_VM) if BASE_VM in vms else None
+    rows = []
+    for s in all_sessions():
+        meta = s.load()
+        vm = vms.get(s.vm)
+        rows.append({
+            "name": s.name,
+            "repo": meta["repo"],
+            "branch": meta["branch"],
+            "vm": s.vm,
+            "state": vm["State"] if vm else "missing",
+            "running": bool(vm and vm.get("Running")),
+            "size_gb": vm_growth_gb(s.vm, base_gb) if vm else None,
+            "mailbox": str(s.mailbox),
+        })
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        log("no sessions\ncreate one with: moat-mac create")
+        return
+    fmt = "{:<18} {:<10} {:<32} {}"
+    print(fmt.format("SESSION", "STATE", "REPO", "SIZE"))
+    # The base image isn't a session: it is never run, and every session's
+    # size below is growth on top of it.
+    if base_gb is not None:
+        print(fmt.format("<base-vm>", "-", "-", f"{base_gb:.1f} GB"))
+    home = str(Path.home())
+    for r in rows:
+        repo = r["repo"]
+        if repo == home or repo.startswith(home + "/"):
+            repo = "~" + repo[len(home):]
+        size = f"{r['size_gb']:.1f} GB" if r["size_gb"] is not None else "-"
+        print(fmt.format(r["name"], r["state"], repo, size))
+
+
+
+def pull_branch(s, meta, branch, parent, force=False):
+    """Update local branch moat-mac/<session>/<branch> from the mailbox,
+    building on its parent branch when it has one.
+    Returns True unless the branch had to be skipped."""
+    repo = meta["repo"]
+    base = meta["base_commit"]
+    ref = f"moat-mac/{s.name}/{branch}"
+    if parent is None:
+        root, root_name = base, base[:10]
+    else:
+        name, fork = parent
+        parent_ref = f"moat-mac/{s.name}/{name}"
+        commits = git_out(repo, "rev-list", "--reverse", f"{base}..{parent_ref}").split()
+        if fork is None:
+            fork = len(commits)
+        if fork > len(commits):
+            warn(f'skipping "{ref}": it forks from commit {fork} of '
+                 f'"{parent_ref}", which has only {len(commits)}')
+            return False
+        root = commits[fork - 1] if fork else base
+        root_name = f'"{parent_ref}" commit {fork}'
+
+    try:
+        sections = read_series(s, branch)
+    except ValueError as e:
+        warn(f'skipping "{ref}": {e}')
+        return False
+
+    # The local branch is linear and append-only: its existing commits must
+    # be a prefix of the series (compared by subject and patch-id, which
+    # survive git-am's re-minting of shas).
+    exists = subprocess.run(
+        ["git", "-C", repo, "rev-parse", "--verify", "--quiet",
+         f"refs/heads/{ref}"],
+        stdout=subprocess.DEVNULL,
+    ).returncode == 0
+    existing = []
+    if exists:
+        out = git_out(repo, "rev-list", "--reverse", f"{root}..{ref}")
+        existing = out.splitlines() if out else []
+
+    diverged = None
+    if len(existing) > len(sections):
+        diverged = (f'"{ref}" has {len(existing)} commits but the mailbox '
+                    f"has only {len(sections)}")
+    else:
+        for i, sha in enumerate(existing):
+            subject, section = sections[i]
+            have = git_out(repo, "log", "-1", "--format=%s", sha)
+            if have != subject or patch_id(repo, git_out(repo, "show", sha)) != patch_id(repo, section):
+                diverged = (f'commit {i + 1} ("{subject}") does not match '
+                            f'{sha[:10]} on "{ref}"')
+                break
+
+    if diverged is not None:
+        if not force:
+            warn(f"{diverged}\n"
+                 f'"{ref}" was rewritten in the VM\n'
+                 "reset the local branch and re-pull with: "
+                 f"moat-mac pull {branch} --session {s.name} --force")
+            return False
+        reset = subprocess.run(
+            ["git", "-C", repo, "branch", "-f", ref, root],
+            capture_output=True, text=True,
+        )
+        if reset.returncode != 0:
+            warn(f'could not reset "{ref}" to {root_name}\n'
+                 + (reset.stderr.strip().split("\n")[0] if reset.stderr
+                    else "git branch -f failed"))
+            return False
+        dropped = "s" if len(existing) != 1 else ""
+        print(f'moat-mac: reset "{ref}" to {root_name}, '
+              f"dropping {len(existing)} commit{dropped}")
+        existing = []
+
+    new_sections = sections[len(existing):]
+    if not new_sections:
+        print(f'moat-mac: "{ref}" is up to date ({len(existing)} commits)')
+        return True
+
+    # git-am the new commits onto the tip in a throwaway worktree; the
+    # user's checkout is never touched.
+    tip = existing[-1] if existing else root
+    with tempfile.TemporaryDirectory(prefix="moat-mac-pull-") as tmp:
+        wt = str(Path(tmp) / "wt")
+        to_apply = Path(tmp) / "new.patch"
+        to_apply.write_text("".join(section for _, section in new_sections))
+        subprocess.run(
+            ["git", "-C", repo, "worktree", "add", "--detach", wt, tip],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            am = subprocess.run(
+                ["git", "-C", wt, "am", str(to_apply)],
+                capture_output=True, text=True,
+            )
+            if am.returncode != 0:
+                subprocess.run(
+                    ["git", "-C", wt, "am", "--abort"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                warn(f'"{ref}" did not apply onto {tip[:10]}\n'
+                     + (am.stderr.strip().split("\n")[0] if am.stderr else "git am failed"))
+                return False
+            head = git_out(wt, "rev-parse", "HEAD")
+            update = subprocess.run(
+                ["git", "-C", repo, "branch", "-f", ref, head],
+                capture_output=True, text=True,
+            )
+            if update.returncode != 0:
+                warn(f'could not update branch "{ref}"\n' + update.stderr.strip())
+                return False
+        finally:
+            subprocess.run(
+                ["git", "-C", repo, "worktree", "remove", "--force", wt],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+
+    verb = "advanced by" if existing else "created with"
+    total = len(existing) + len(new_sections)
+    plural = "s" if len(new_sections) != 1 else ""
+    print(f'moat-mac: "{ref}" {verb} {len(new_sections)} commit{plural} '
+          f"({total} total)")
+    return True
+
+
+def cmd_pull(args):
+    s = resolve_session(args.session)
+    meta = s.load()
+    branches = s.published_branches()
+    if args.branch:
+        if args.branch not in branches:
+            die(f'no published branch "{args.branch}" in the mailbox')
+        # A branch is built on its ancestors, so they come along.
+        branches = [b for b in branch_chain(s, args.branch) if b in branches]
+    if not branches:
+        print("moat-mac: nothing published yet")
+        return
+    prefix = f"moat-mac/{s.name}/"
+    parents, ordered, skipped = order_branches(s, branches)
+    plural = "es" if len(branches) != 1 else ""
+    confirm(
+        f"pull {len(branches)} branch{plural} into {meta['repo']}?\n"
+        + "\n".join(branch_tree(parents, ordered, skipped, prefix))
+        + ("\n**--force resets branches rewritten in the VM, discarding "
+           "local commits on them**" if args.force else "")
+    )
+    for branch, reason in skipped:
+        warn(f'skipping "{prefix}{branch}": {reason}')
+
+    pulled = set()
+    failed = bool(skipped)
+    for branch in ordered:
+        parent = parents[branch]
+        if parent is not None and parent[0] not in pulled:
+            warn(f'skipping "{prefix}{branch}": '
+                 f'its parent "{prefix}{parent[0]}" was not updated')
+            failed = True
+            continue
+        if pull_branch(s, meta, branch, parent, args.force):
+            pulled.add(branch)
+        else:
+            failed = True
+    if failed:
+        sys.exit(1)
+
+
+def write_series(branch_dir, patches, parent):
+    """Write a branch's per-commit patches and PARENT into the mailbox."""
+    branch_dir.mkdir(parents=True, exist_ok=True)
+    for i, text in enumerate(patches, start=1):
+        path = branch_dir / f"{i:04d}.patch"
+        if path.is_file() and path.read_text() == text:
+            continue
+        tmp = branch_dir / f".{i:04d}.patch.tmp"
+        tmp.write_text(text)
+        tmp.rename(path)
+    for path in branch_dir.iterdir():
+        m = PATCH_RE.match(path.name)
+        if m and int(m.group(1)) > len(patches):
+            path.unlink()
+    parent_file = branch_dir / "PARENT"
+    if parent:
+        name, fork = parent
+        tmp = branch_dir / ".PARENT.tmp"
+        tmp.write_text(f"{name}\n{fork}\n")
+        tmp.rename(parent_file)
+    elif parent_file.exists():
+        parent_file.unlink()
+
+
+def cmd_push(args):
+    """Write local moat-mac/<session>/* branches into the mailbox, so the
+    agent can pick up commits or history rewrites made on the host."""
+    s = resolve_session(args.session)
+    meta = s.load()
+    repo, base = meta["repo"], meta["base_commit"]
+    prefix = f"moat-mac/{s.name}/"
+
+    refs = git_out(repo, "for-each-ref", "--format=%(refname:short)",
+                   f"refs/heads/{prefix}*").splitlines()
+    names = [r[len(prefix):] for r in refs if r.startswith(prefix)]
+    if not names:
+        die(f'no "{prefix}*" branches in {repo}')
+    if args.branch and args.branch not in names:
+        die(f'no branch "{prefix}{args.branch}" in {repo}')
+
+    # A branch's parent is whatever the mailbox already records, so the
+    # structure the agent published survives commits made here.
+    recorded = {}
+    for published in s.published_branches():
+        try:
+            recorded[published] = read_parent(s, published)
+        except ValueError:
+            recorded[published] = None
+
+    depths = {n: int(git_out(repo, "rev-list", "--count", f"{base}..{prefix}{n}"))
+              for n in names}
+    parents = {}
+    for name in names:
+        if name in recorded:
+            known = recorded[name]
+            parents[name] = None
+            if known and known[0] in names:
+                fork = git_out(repo, "merge-base", prefix + known[0], prefix + name)
+                shared = int(git_out(repo, "rev-list", "--count", f"{base}..{fork}"))
+                if shared:
+                    parents[name] = (known[0], shared)
+            continue
+        # Never published: infer, letting only a shorter branch (ties broken
+        # by name) be the parent so two branches cannot claim each other.
+        best, deepest = None, 0
+        for other in names:
+            # Only a shorter branch (ties broken by name) can be the parent,
+            # so two branches can never claim each other.
+            if other == name or (depths[other], other) >= (depths[name], name):
+                continue
+            fork = git_out(repo, "merge-base", prefix + other, prefix + name)
+            if not fork or fork == git_out(repo, "rev-parse", prefix + name):
+                continue
+            shared = int(git_out(repo, "rev-list", "--count", f"{base}..{fork}"))
+            if shared > deepest:
+                best, deepest = (other, shared), shared
+        parents[name] = best
+
+    if args.branch:
+        chain, current = [], args.branch
+        while current is not None and current not in chain:
+            chain.append(current)
+            parent = parents[current]
+            current = parent[0] if parent else None
+        selected = list(reversed(chain))
+    else:
+        selected = sorted(names, key=lambda n: len(branch_chain_local(parents, n)))
+
+    series, empty = {}, []
+    for name in selected:
+        ref = prefix + name
+        if parents[name] is None:
+            root = base
+        else:
+            root = git_out(repo, "merge-base", prefix + parents[name][0], ref)
+        if git_out(repo, "rev-list", "--merges", f"{root}..{ref}"):
+            die(f'"{ref}" contains merge commits\n'
+                "published history must be linear (rebase to flatten it)")
+        shas = git_out(repo, "rev-list", "--reverse", f"{root}..{ref}").split()
+        if not shas:
+            where = f'"{prefix}{parents[name][0]}"' if parents[name] else base[:10]
+            if args.branch:
+                die(f'"{ref}" has no commits beyond {where}\nnothing to push')
+            empty.append(name)
+            continue
+        patches = []
+        for sha in shas:
+            text = git_out(repo, "format-patch", "-1", "--stdout", sha)
+            try:
+                validate_patch_text(text)
+            except ValueError as e:
+                die(f'"{prefix}{name}" commit {sha[:10]} cannot be pushed: {e}')
+            patches.append(text)
+        series[name] = patches
+
+    for name in empty:
+        print(f'moat-mac: nothing to push on "{prefix}{name}"')
+    ordered = [n for n in selected if n in series]
+    if not ordered:
+        die("no branch has commits to push")
+    plural = "es" if len(ordered) != 1 else ""
+    confirm(
+        f'push {len(ordered)} branch{plural} into the mailbox of session "{s.name}"?\n'
+        + "\n".join(branch_tree(parents, ordered, [], prefix))
+    )
+    for name in ordered:
+        write_series(s.from_host_dir / name, series[name], parents[name])
+        count = len(series[name])
+        print(f'moat-mac: pushed "{prefix}{name}" '
+              f"({count} commit{'s' if count != 1 else ''})")
+    log("the agent picks these up in the VM with: moat-fetch")
+
+
+def branch_chain_local(parents, name):
+    """A branch and its ancestors, from the parents map."""
+    chain, current = [], name
+    while current is not None and current not in chain:
+        chain.append(current)
+        parent = parents.get(current)
+        current = parent[0] if parent else None
+    return chain
+
+
+def cmd_share(args):
+    s = resolve_session(args.session)
+    sources = []
+    for f in args.files:
+        src = Path(f)
+        if src.is_dir():
+            die(f"{src} is a directory\nshare individual files instead")
+        if not src.is_file():
+            die(f"{src} is not a file")
+        if (s.shared_dir / src.name).exists():
+            die(f"{src.name} is already shared")
+        sources.append(src)
+
+    plural = "s" if len(sources) != 1 else ""
+    confirm(
+        f'share {len(sources)} file{plural} into the mailbox of session "{s.name}"?\n'
+        + "\n".join(f"- {src}" for src in sources)
+    )
+    s.shared_dir.mkdir(exist_ok=True)
+    for src in sources:
+        shutil.copy(src, s.shared_dir / src.name)
+        print(f"moat-mac: shared {src.name} -> mailbox/shared")
+
+
+def cmd_delete(args):
+    s = resolve_session(args.session)
+    confirm(f'delete session "{s.name}"?\n'
+            f"- deletes VM {s.vm}\n"
+            "- deletes the mailbox and all pulled patch history")
+    if vm_exists(s.vm):
+        tart("delete", s.vm, check=True)
+    shutil.rmtree(s.dir)
+    print(f'moat-mac: deleted session "{s.name}"')
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="moat-mac", description=__doc__.split("\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("setup", help="install the base VM image that sessions are cloned from")
+    p.add_argument("--cpu", type=int, default=BASE_CPU, metavar="N",
+                   help=f"CPU count for the base image (default: {BASE_CPU})")
+    p.add_argument("--memory", type=int, default=BASE_MEMORY_MB, metavar="MB",
+                   help=f"memory for the base image (default: {BASE_MEMORY_MB})")
+    p.set_defaults(func=cmd_setup)
+
+    p = sub.add_parser("create", help="create a session from a fresh clone of a repo")
+    p.add_argument("--repo", default=".", metavar="PATH",
+                   help="git repo to seed the session with (default: current directory)")
+    p.add_argument("--name", metavar="NAME",
+                   help="session name (default: the repo directory name)")
+    p.add_argument("--verbose", action="store_true")
+    p.set_defaults(func=cmd_create)
+
+    p = sub.add_parser("start", help="boot a session VM and run claude in it")
+    p.add_argument("--session", metavar="NAME",
+                   help="session to target (default: the current directory's session)")
+    p.add_argument("--no-claude", action="store_true",
+                   help="boot the VM without launching claude")
+    p.add_argument("--permission-mode", default="auto", metavar="MODE",
+                   help="Claude Code permission mode (default: auto; see claude for allowed values)")
+    p.add_argument("--model", default="opus", metavar="MODEL",
+                   help="Claude model for the session (default: opus; see claude for allowed values)")
+    p.add_argument("claude_args", nargs="*", help="extra arguments forwarded to claude")
+    p.set_defaults(func=cmd_start)
+
+    p = sub.add_parser("stop", help="stop a session VM")
+    p.add_argument("--session", metavar="NAME",
+                   help="session to target (default: the current directory's session)")
+    p.set_defaults(func=cmd_stop)
+
+    p = sub.add_parser("shell", help="shell into a running session VM")
+    p.add_argument("--session", metavar="NAME",
+                   help="session to target (default: the current directory's session)")
+    p.set_defaults(func=cmd_shell)
+
+    p = sub.add_parser("list", help="list sessions")
+    p.add_argument("--json", action="store_true", help="output sessions as JSON")
+    p.set_defaults(func=cmd_list)
+
+    p = sub.add_parser("pull", help="update local moat-mac/<name>/* branches from the mailbox")
+    p.add_argument("branch", nargs="?", help="pull only this published branch")
+    p.add_argument("--force", action="store_true",
+                   help="reset branches rewritten in the VM instead of skipping them")
+    p.add_argument("--session", metavar="NAME",
+                   help="session to target (default: the current directory's session)")
+    p.set_defaults(func=cmd_pull)
+
+    p = sub.add_parser("push", help="write local moat-mac/<name>/* branches into the mailbox")
+    p.add_argument("branch", nargs="?", help="push only this branch and its ancestors")
+    p.add_argument("--session", metavar="NAME",
+                   help="session to target (default: the current directory's session)")
+    p.set_defaults(func=cmd_push)
+
+    p = sub.add_parser("share", help="share files from the host into the mailbox")
+    p.add_argument("--file", dest="files", action="append", required=True,
+                   metavar="PATH", help="file to copy into the mailbox (repeatable)")
+    p.add_argument("--session", metavar="NAME",
+                   help="session to target (default: the current directory's session)")
+    p.set_defaults(func=cmd_share)
+
+    p = sub.add_parser("delete", help="delete a session's VM, mailbox, and patch history")
+    p.add_argument("--session", metavar="NAME",
+                   help="session to target (default: the current directory's session)")
+    p.set_defaults(func=cmd_delete)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
