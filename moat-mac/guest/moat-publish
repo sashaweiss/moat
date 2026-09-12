@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""moat-publish -- publish the current branch to the host, via the mailbox.
+
+Writes the branch's commits to ~/mailbox/branches/<branch>/ as one
+plain-text patch file per commit (0001.patch = the first commit). Re-run
+after new commits to update the published branch; the host pulls it with
+`moat-mac pull`.
+
+A branch based on another published branch records it in a PARENT file
+and publishes only its own commits, so the host rebuilds the same
+topology instead of duplicating shared history.
+
+Checks done here (clean worktree, linear history based on the session
+base, plain text, no binaries) are early feedback so problems can be
+fixed before the host refuses the branch: the host independently
+validates everything it pulls, and this script is not a security
+boundary.
+"""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import unicodedata
+from pathlib import Path
+
+MAILBOX = Path.home() / "mailbox"
+CONFIG = Path.home() / ".moat-mac.json"
+BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+MAX_PATCH_BYTES = 10 * 1024 * 1024
+MAX_COMMITS = 9999
+
+# Mirrors the host's validation in `moat-mac`, which is authoritative.
+ALLOWED_CHARS = {
+    "\n", "\t",
+    "\u200d",  # Zero-width joiner, for emoji sequences
+}
+
+
+def disallowed_char(text):
+    """Return the index of the first disallowed character, or None."""
+    for i, ch in enumerate(text):
+        if ch not in ALLOWED_CHARS and unicodedata.category(ch).startswith("C"):
+            return i
+    return None
+
+
+BINARY_MARKERS = (
+    re.compile(r"^GIT binary patch", re.M),
+    re.compile(r"^Binary files .* differ$", re.M),
+)
+
+
+def die(msg):
+    print(f"moat-publish: error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def git(repo, *args):
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        stdout=subprocess.PIPE, check=True,
+    ).stdout
+
+
+def validate(text, subject):
+    i = disallowed_char(text)
+    if i is not None:
+        line = text.count("\n", 0, i) + 1
+        die(f'commit "{subject}" contains disallowed character '
+            f"U+{ord(text[i]):04X} on line {line} of its patch. Patches may "
+            "not contain control or formatting characters (Unicode category C, "
+            "other than newline, tab, and zero-width joiner); rewrite the change to avoid this "
+            "character.")
+    for marker in BINARY_MARKERS:
+        if marker.search(text):
+            die(f'commit "{subject}" contains a binary file change; binary '
+                "files cannot be published through the mailbox. Remove the "
+                "binary from the branch.")
+
+
+def main():
+    argparse.ArgumentParser(description=__doc__.split("\n")[0]).parse_args()
+
+    if not CONFIG.is_file():
+        die(f"missing {CONFIG}; is this a moat-mac session VM?")
+    config = json.loads(CONFIG.read_text())
+    repo = Path.home() / "work" / config["repo_name"]
+    base = config["base_commit"]
+
+    if not (MAILBOX / "branches").is_dir():
+        die("mailbox is not mounted (the host must boot this VM via moat-mac)")
+
+    prefix = f"moat-mac/{config['session']}/"
+    branch = git(repo, "rev-parse", "--abbrev-ref", "HEAD").decode().strip()
+    if branch == "HEAD":
+        die("detached HEAD; check out a branch to publish")
+    if not branch.startswith(prefix):
+        die(f'branch "{branch}" is outside this session\'s namespace; work on '
+            f"branches under {prefix} so the host sees the same names, and "
+            f"rename this one with: git branch -m {branch} {prefix}{branch}")
+    leaf = branch[len(prefix):]
+    if not BRANCH_RE.match(leaf) or ".." in leaf or leaf.endswith(".lock"):
+        die(f'branch "{branch}" cannot be published; after {prefix} use only '
+            "letters, digits, and ._- (no slashes), and rename it with: "
+            f"git branch -m {branch} {prefix}<new-name>")
+
+    dirty = git(repo, "status", "--porcelain").decode().strip()
+    if dirty:
+        die("worktree has uncommitted changes; commit everything you want "
+            "to publish first (patches are built from commits)")
+    ancestor = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", base, "HEAD"],
+    )
+    if ancestor.returncode != 0:
+        die(f"branch is not based on the session base commit {base[:10]}")
+    merges = git(repo, "rev-list", "--merges", f"{base}..HEAD").decode().strip()
+    if merges:
+        die("branch contains merge commits; published history must be "
+            "linear (rebase to flatten it)")
+
+    # Build on whichever published branch shares the most history with this
+    # one, so shared commits live there instead of being duplicated here.
+    head = git(repo, "rev-parse", "HEAD").decode().strip()
+    depth = int(git(repo, "rev-list", "--count", f"{base}..HEAD").decode())
+    parent, parent_fork, root, deepest = None, 0, base, 0
+
+    # Keep the parent recorded by an earlier publish, so the structure does
+    # not flip when a branch grows.
+    recorded = MAILBOX / "branches" / leaf / "PARENT"
+    if recorded.is_file():
+        name = recorded.read_text().split("\n")[0].strip()
+        if name and name != leaf and (MAILBOX / "branches" / name).is_dir():
+            ref = prefix + name
+            known = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", ref],
+                stdout=subprocess.DEVNULL,
+            ).returncode == 0
+            if known:
+                fork = git(repo, "merge-base", ref, "HEAD").decode().strip()
+                shared = int(git(repo, "rev-list", "--count", f"{base}..{fork}").decode())
+                if shared and fork != head:
+                    parent, parent_fork, root, deepest = name, shared, fork, shared
+
+    for entry in (MAILBOX / "branches").iterdir():
+        if parent is not None:
+            break
+        name = entry.name
+        if not entry.is_dir() or name == leaf:
+            continue
+        ref = prefix + name
+        known = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", ref],
+            stdout=subprocess.DEVNULL,
+        ).returncode == 0
+        if not known:
+            continue
+        # Only a shorter branch (ties broken by name) can be the parent, so
+        # two branches can never claim each other.
+        other_depth = int(git(repo, "rev-list", "--count", f"{base}..{ref}").decode())
+        if (other_depth, name) >= (depth, leaf):
+            continue
+        fork = git(repo, "merge-base", ref, "HEAD").decode().strip()
+        if not fork or fork == head:
+            continue
+        shared = int(git(repo, "rev-list", "--count", f"{base}..{fork}").decode())
+        if shared > deepest:
+            parent, parent_fork, root, deepest = name, shared, fork, shared
+
+    shas = git(repo, "rev-list", "--reverse", f"{root}..HEAD").decode().split()
+    if not shas:
+        if parent:
+            die(f'no commits beyond published branch "{parent}"; '
+                "nothing to publish")
+        die(f"no commits since base {base[:10]}; nothing to publish")
+    if len(shas) > MAX_COMMITS:
+        die(f"branch has more than {MAX_COMMITS} commits")
+
+    # Generate and validate every patch before writing anything.
+    patches = []
+    for sha in shas:
+        raw = git(repo, "format-patch", "-1", "--stdout", sha)
+        if len(raw) > MAX_PATCH_BYTES:
+            die(f"the patch for commit {sha[:10]} exceeds {MAX_PATCH_BYTES} bytes")
+        try:
+            text = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            die(f"the patch for commit {sha[:10]} is not valid UTF-8 text; "
+                "does it add or modify a binary file?")
+        m = re.search(r"^Subject: (?:\[PATCH[^\]]*\] )?(.*)$", text, re.M)
+        subject = m.group(1) if m else sha[:10]
+        validate(text, subject)
+        patches.append(text)
+
+    branch_dir = MAILBOX / "branches" / leaf
+    branch_dir.mkdir(exist_ok=True)
+    parent_file = branch_dir / "PARENT"
+    if parent:
+        tmp = branch_dir / ".PARENT.tmp"
+        tmp.write_text(f"{parent}\n{parent_fork}\n")
+        tmp.rename(parent_file)
+    elif parent_file.exists():
+        parent_file.unlink()
+    written = 0
+    for i, text in enumerate(patches, start=1):
+        path = branch_dir / f"{i:04d}.patch"
+        if path.is_file() and path.read_text() == text:
+            continue
+        tmp = branch_dir / f".{i:04d}.patch.tmp"
+        tmp.write_text(text)
+        tmp.rename(path)
+        written += 1
+    # Drop files beyond the series (left over from a rewrite that shortened it).
+    stale = 0
+    for path in branch_dir.iterdir():
+        m = re.match(r"^(\d{4})\.patch$", path.name)
+        if m and int(m.group(1)) > len(patches):
+            path.unlink()
+            stale += 1
+
+    detail = f"{written} updated" + (f", {stale} removed" if stale else "")
+    on = f' on "{prefix}{parent}"' if parent else ""
+    print(f'moat-publish: published "{branch}"{on} '
+          f"({len(patches)} commits, {detail})")
+    print("moat-publish: the host pulls it with: moat-mac pull "
+          f"{leaf} --session {config['session']}")
+
+
+if __name__ == "__main__":
+    main()

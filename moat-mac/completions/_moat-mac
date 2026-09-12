@@ -1,0 +1,104 @@
+#compdef moat-mac
+# Zsh completions for moat-mac. Add to your fpath (before compinit):
+#   fpath+=(/path/to/moat/moat-mac/completions)
+
+_moat-mac_sessions() {
+  local -a sessions
+  local dir
+  for dir in ${MOAT_MAC_HOME:-$HOME/.moat-mac}/*/session.json(N); do
+    sessions+=(${dir:h:t})
+  done
+  _describe -t sessions 'session' sessions
+}
+
+_moat-mac_default_session() {
+  # Prints the session whose repo contains $PWD, if any.
+  local dir repo
+  for dir in ${MOAT_MAC_HOME:-$HOME/.moat-mac}/*/session.json(N); do
+    repo=$(sed -n 's/.*"repo": "\([^"]*\)".*/\1/p' $dir | head -1)
+    if [[ -n $repo && ( $PWD == $repo || $PWD == $repo/* ) ]]; then
+      print -r -- ${dir:h:t}
+      return
+    fi
+  done
+}
+
+_moat-mac_published_branches() {
+  local session=${opt_args[--session]:-$(_moat-mac_default_session)}
+  [[ -n $session ]] || return 1
+  local -a branches
+  local dir
+  for dir in ${MOAT_MAC_HOME:-$HOME/.moat-mac}/$session/mailbox/branches/*(N/); do
+    branches+=(${dir:t})
+  done
+  _describe -t branches 'published branch' branches
+}
+
+_moat-mac() {
+  local -a subcommands=(
+    'setup:install the base VM image that sessions are cloned from'
+    'create:create a session from a fresh clone of a repo'
+    'start:boot a session VM and run claude in it'
+    'stop:stop a session VM'
+    'shell:shell into a running session VM'
+    'list:list sessions'
+    'pull:update local moat-mac/<name>/* branches from the mailbox'
+    'share:share files from the host into the mailbox'
+    "delete:delete a session's VM, mailbox, and patch history"
+  )
+  local session_flag="--session[session to target (default: the current directory's session)]:session:_moat-mac_sessions"
+
+  local curcontext=$curcontext state state_descr line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:subcommand:->subcommand' \
+    '*::arg:->args'
+
+  case $state in
+    subcommand)
+      _describe -t subcommands 'moat-mac subcommand' subcommands
+      ;;
+    args)
+      case $line[1] in
+        setup)
+          _arguments \
+            '--cpu[CPU count for the base image (default: 6)]:count:' \
+            '--memory[memory for the base image (default: 12288)]:megabytes:'
+          ;;
+        create)
+          _arguments \
+            '--repo[git repo to seed the session with (default: current directory)]:repository:_files -/' \
+            '--name[session name (default: the repo directory name)]:name:' \
+            '--verbose'
+          ;;
+        start)
+          _arguments \
+            $session_flag \
+            '--no-claude[boot the VM without launching claude]' \
+            '--permission-mode[Claude Code permission mode (default: auto; see claude for allowed values)]:mode:' \
+            '--model[Claude model for the session (default: opus; see claude for allowed values)]:model:'
+          ;;
+        stop|shell|delete)
+          _arguments $session_flag
+          ;;
+        list)
+          _arguments '--json[output sessions as JSON]'
+          ;;
+        pull)
+          _arguments \
+            $session_flag \
+            '--force[reset branches rewritten in the VM instead of skipping them]' \
+            '1::branch:_moat-mac_published_branches'
+          ;;
+        share)
+          _arguments \
+            $session_flag \
+            '*--file[file to copy into the mailbox (repeatable)]:file:_files'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_moat-mac "$@"
