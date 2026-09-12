@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""moat-fetch -- pick up branches the host pushed into the mailbox.
+
+The host writes branches to ~/mailbox/from-host/<branch>/ as one
+plain-text patch file per commit. Each is rebuilt onto your matching
+moat-mac/<session>/<branch> branch when that is a fast-forward, so both
+sides share the same branch names. If your branch has diverged, the
+rebuilt branch lands as `host/<branch>` instead and you reconcile it
+yourself (`git rebase`, `git reset --hard`, or just read the diff).
+"""
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+MAILBOX = Path.home() / "mailbox"
+CONFIG = Path.home() / ".moat-mac.json"
+PATCH_RE = re.compile(r"^(\d{4})\.patch$")
+
+
+def die(msg):
+    print(f"moat-fetch: error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def git(repo, *args, check=True):
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        stdout=subprocess.PIPE, text=True, check=check,
+    ).stdout.strip()
+
+
+def commit_patch_ids(repo, rng):
+    """Content identity of each commit in a range, ignoring sha and dates."""
+    ids = []
+    for sha in git(repo, "rev-list", "--reverse", rng).split():
+        show = subprocess.run(["git", "-C", str(repo), "show", sha],
+                              stdout=subprocess.PIPE, check=True)
+        out = subprocess.run(["git", "-C", str(repo), "patch-id", "--stable"],
+                             input=show.stdout, stdout=subprocess.PIPE,
+                             check=True).stdout.split()
+        ids.append(out[0].decode() if out else "")
+    return ids
+
+
+def read_parent(branch_dir):
+    """(parent branch, fork count) or None for the session base."""
+    parent_file = branch_dir / "PARENT"
+    if not parent_file.is_file():
+        return None
+    lines = parent_file.read_text().split("\n")
+    name = lines[0].strip()
+    fork = lines[1].strip() if len(lines) > 1 else ""
+    if not name:
+        return None
+    return (name, int(fork) if fork.isdigit() else None)
+
+
+def series_for(branch_dir):
+    numbered = {}
+    for path in branch_dir.iterdir():
+        m = PATCH_RE.match(path.name)
+        if m:
+            numbered[int(m.group(1))] = path
+    if sorted(numbered) != list(range(1, len(numbered) + 1)):
+        die(f"{branch_dir.name} has gaps in its patch numbering")
+    return [numbered[n] for n in sorted(numbered)]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("branch", nargs="?", help="fetch only this branch")
+    args = parser.parse_args()
+
+    if not CONFIG.is_file():
+        die(f"missing {CONFIG}; is this a moat-mac session VM?")
+    config = json.loads(CONFIG.read_text())
+    repo = Path.home() / "work" / config["repo_name"]
+    base = config["base_commit"]
+    prefix = f"moat-mac/{config['session']}/"
+
+    from_host = MAILBOX / "from-host"
+    if not from_host.is_dir():
+        die("mailbox is not mounted (the host must boot this VM via moat-mac)")
+    available = sorted(d.name for d in from_host.iterdir() if d.is_dir())
+    if not available:
+        print("moat-fetch: the host has not pushed any branches")
+        return
+    if args.branch and args.branch not in available:
+        die(f'the host has not pushed "{args.branch}" '
+            f"(available: {', '.join(available)})")
+
+    # Parents first, so a branch is built on an already-rebuilt parent.
+    parents = {b: read_parent(from_host / b) for b in available}
+    ordered, remaining = [], list(available)
+    while remaining:
+        ready = [b for b in remaining
+                 if parents[b] is None or parents[b][0] not in remaining]
+        if not ready:
+            die(f"pushed branches have a broken parent chain: {', '.join(remaining)}")
+        ordered += ready
+        remaining = [b for b in remaining if b not in ready]
+
+    if args.branch:
+        wanted, current = [], args.branch
+        while current is not None and current not in wanted:
+            wanted.append(current)
+            parent = parents.get(current)
+            current = parent[0] if parent else None
+        ordered = [b for b in ordered if b in wanted]
+
+    landed_as = {}
+    for branch in ordered:
+        parent = parents[branch]
+        if parent is None:
+            root, root_name = base, base[:10]
+        else:
+            name, fork = parent
+            parent_ref = landed_as.get(name, prefix + name)
+            if subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", parent_ref],
+                stdout=subprocess.DEVNULL,
+            ).returncode != 0:
+                die(f'cannot build "{branch}": its parent "{parent_ref}" is missing here')
+            commits = git(repo, "rev-list", "--reverse", f"{base}..{parent_ref}").split()
+            if fork is None:
+                fork = len(commits)
+            if fork > len(commits):
+                die(f'cannot build "{branch}": it forks from commit {fork} of '
+                    f'"{parent_ref}", which has only {len(commits)}')
+            root = commits[fork - 1] if fork else base
+            root_name = f'"{parent_ref}" commit {fork}'
+
+        patches = series_for(from_host / branch)
+        tmp = tempfile.mkdtemp(prefix="moat-fetch-")
+        worktree = str(Path(tmp) / "wt")
+        try:
+            git(repo, "worktree", "add", "--detach", worktree, root)
+            am = subprocess.run(
+                ["git", "-C", worktree, "am", *[str(p) for p in patches]],
+                capture_output=True, text=True,
+            )
+            if am.returncode != 0:
+                subprocess.run(["git", "-C", worktree, "am", "--abort"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                die(f'"{branch}" did not apply onto {root}: '
+                    + (am.stderr.strip().split("\n")[0] if am.stderr else "git am failed"))
+            head = git(worktree, "rev-parse", "HEAD")
+            target = prefix + branch
+            exists = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", target],
+                stdout=subprocess.DEVNULL,
+            ).returncode == 0
+            # Safe to move the branch if the host's version already
+            # contains this branch's work: literally, or -- since patches
+            # are re-applied on both sides, minting new shas -- by content.
+            safe = not exists or subprocess.run(
+                ["git", "-C", str(repo), "merge-base", "--is-ancestor", target, head],
+            ).returncode == 0
+            if exists and not safe:
+                mine = commit_patch_ids(repo, f"{root}..{target}")
+                theirs = commit_patch_ids(repo, f"{root}..{head}")
+                safe = theirs[:len(mine)] == mine
+            if not safe:
+                target = f"host/{branch}"
+            git(repo, "branch", "-f", target, head)
+            landed = landed_as[branch] = target
+        finally:
+            subprocess.run(["git", "-C", str(repo), "worktree", "remove",
+                            "--force", worktree],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            shutil.rmtree(tmp, ignore_errors=True)
+        count = len(patches)
+        print(f'moat-fetch: built "{landed}" '
+              f"({count} commit{'s' if count != 1 else ''} on {root_name})")
+        if landed.startswith("host/"):
+            print(f'moat-fetch: "{prefix}{branch}" has diverged from the host; '
+                  f'reconcile it with "{landed}" yourself')
+
+    print("moat-fetch: rebase or reset any diverged branches yourself")
+
+
+if __name__ == "__main__":
+    main()
