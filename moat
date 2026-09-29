@@ -159,6 +159,14 @@ def main() -> int:
             },
         }))
 
+    # Likewise, seed a settings.json into the state directory, which is mounted
+    # at ~/.claude.
+    settings_path = state_dir / "settings.json"
+    if not settings_path.exists():
+        settings_path.write_text(json.dumps({
+            "autoMemoryDirectory": "~/.claude/memory",
+        }))
+
     # For debugging purposes, write a pointer from the workspace hash back to
     # the workspace itself. This isn't mounted into the container.
     workspace_hash_hint_path = moat_dir / f"{workspace_hash}.pointer"
