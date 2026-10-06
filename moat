@@ -30,6 +30,21 @@ def resolve_git_common_dir(workspace: Path) -> Path | None:
     return Path(result.stdout.strip())
 
 
+def find_git_dirs(root: Path) -> list[Path]:
+    """
+    Return all .git/ directories at or below `root`. Does not include or follow
+    symlinks.
+    """
+    git_dirs = []
+    for dirpath, dirnames, _ in os.walk(root):
+        if ".git" in dirnames:
+            dirnames.remove(".git")
+            git_dir = Path(dirpath) / ".git"
+            if not git_dir.is_symlink():
+                git_dirs.append(git_dir)
+    return git_dirs
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="moat",
@@ -148,6 +163,14 @@ def main() -> int:
     # However, if specifically requested we'll allow git dir write access.
     git_mount_mode = "rw" if git_write else "ro"
 
+    # Also apply the git mount mode to any nested repos in the workspace (e.g.,
+    # independent clones), since they'd otherwise be writable via the workspace
+    # mount.
+    git_mounts = [git_dir] if git_dir else []
+    for nested_git_dir in find_git_dirs(workspace):
+        if nested_git_dir not in git_mounts:
+            git_mounts.append(nested_git_dir)
+
     # For first-time workspaces, write a dummy .claude.json to populate some
     # default settings (silence FRE prompts). We'll store it in the state
     # directory, then mount it into the container at ~/.claude.json.
@@ -201,16 +224,27 @@ def main() -> int:
         "container", "run", "-it", "--rm",
         "--name", f"moat.{workspace.name}",
         "--cpus", "2", "--memory", "4G",
-        "-v", f"{workspace}:{workspace}",
-        *(["-v", f"{git_dir}:{git_dir}:{git_mount_mode}"] if git_dir else []),
-        "-v", f"{state_dir}:/home/robot/.claude",
-        "-v", f"{credentials_path}:/home/robot/.claude/.credentials.json",
-        "-v", f"{claude_json_path}:/home/robot/.claude.json",
-        *(["-v", f"{skills_dir}:/home/robot/.claude/skills:ro"] if skills_dir else []),
-        *(["-v", f"{claude_md}:/home/robot/.claude/CLAUDE.md:ro"] if claude_md else []),
-        *(["--env-file", str(env_file)] if env_file else []),
         "-u", "robot",
         "-w", str(workspace),
+    ]
+
+    if env_file:
+        cmd += ["--env-file", str(env_file)]
+
+    cmd += ["-v", f"{state_dir}:/home/robot/.claude:rw"]
+    cmd += ["-v", f"{credentials_path}:/home/robot/.claude/.credentials.json:rw"]
+    cmd += ["-v", f"{claude_json_path}:/home/robot/.claude.json:rw"]
+    if skills_dir:
+        cmd += ["-v", f"{skills_dir}:/home/robot/.claude/skills:ro"]
+    if claude_md:
+        cmd += ["-v", f"{claude_md}:/home/robot/.claude/CLAUDE.md:ro"]
+
+    # Mounts nested inside other mounts must come after their parent.
+    cmd += ["-v", f"{workspace}:{workspace}:rw"]
+    for d in git_mounts:
+        cmd += ["-v", f"{d}:{d}:{git_mount_mode}"]
+
+    cmd += [
         "moat:latest",
         "claude",
         "--permission-mode", permission_mode,
