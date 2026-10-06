@@ -66,6 +66,11 @@ def main() -> int:
         default="opus",
         help="Claude model for the session; defaults to the latest Opus (default: opus)",
     )
+    parser.add_argument(
+        "--no-settings",
+        action="store_true",
+        help="don't seed new sessions with the host's ~/.claude/settings.json",
+    )
     args, claude_args = parser.parse_known_args()
     permission_mode = args.permission_mode
     git_write = args.git_access_mode == "write"
@@ -160,13 +165,23 @@ def main() -> int:
         }))
 
     # Likewise, seed a settings.json into the state directory, which is mounted
-    # at ~/.claude.
+    # at ~/.claude. Use the host's ~/.claude/settings.json if present.
     settings_path = state_dir / "settings.json"
     if not settings_path.exists():
-        settings_path.write_text(json.dumps({
-            "autoMemoryDirectory": "~/.claude/memory",
-            "spinnerTipsEnabled": False,
-        }))
+        settings = {}
+        user_settings_path = Path.home() / ".claude" / "settings.json"
+        if not args.no_settings and user_settings_path.exists():
+            try:
+                settings = json.loads(user_settings_path.read_text())
+            except json.JSONDecodeError as e:
+                print(f"moat: invalid JSON in {user_settings_path}: {e}", file=sys.stderr)
+                return 1
+            if not isinstance(settings, dict):
+                print(f"moat: expected a JSON object in {user_settings_path}", file=sys.stderr)
+                return 1
+        # Always set autoMemoryDirectory, since that's part of the moat integration.
+        settings["autoMemoryDirectory"] = "~/.claude/memory"
+        settings_path.write_text(json.dumps(settings, indent=2))
 
     # For debugging purposes, write a pointer from the workspace hash back to
     # the workspace itself. This isn't mounted into the container.
