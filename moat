@@ -61,9 +61,12 @@ def main() -> int:
         help="Claude Code permission mode (default: auto)",
     )
     parser.add_argument(
-        "--skills",
+        "--add-skill",
         metavar="DIR",
-        help="directory of Claude skills to mount read-only into the container",
+        action="append",
+        default=[],
+        help="skill directory to mount into the container, in addition to the "
+        "host's ~/.claude/skills",
     )
     parser.add_argument(
         "--git-access-mode",
@@ -97,14 +100,6 @@ def main() -> int:
         return 1
     workspace = workspace_arg.resolve()
 
-    skills_dir: Path | None = None
-    if args.skills is not None:
-        skills_arg = Path(args.skills)
-        if not skills_arg.is_dir():
-            print(f"moat: not a directory: {args.skills}", file=sys.stderr)
-            return 1
-        skills_dir = skills_arg.resolve()
-
     env_file: Path | None = None
     if args.env_file is not None:
         env_file_arg = Path(args.env_file)
@@ -113,8 +108,26 @@ def main() -> int:
             return 1
         env_file = env_file_arg.resolve()
 
+    # Resolve symlinks, since a symlink's target won't exist in the VM.
     host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
     claude_md: Path | None = host_claude_md.resolve() if host_claude_md.is_file() else None
+
+    # Mount skills individually, keyed by name, so symlinked skills work.
+    skills: dict[str, Path] = {}
+    host_skills_dir = Path.home() / ".claude" / "skills"
+    if host_skills_dir.is_dir():
+        for skill in host_skills_dir.iterdir():
+            if skill.is_dir() and not skill.name.startswith("."):
+                skills[skill.name] = skill.resolve()
+    for skill_arg in args.add_skill:
+        if not Path(skill_arg).is_dir():
+            print(f"moat: not a directory: {skill_arg}", file=sys.stderr)
+            return 1
+        skill = Path(skill_arg).resolve()
+        if skill.name in skills:
+            print(f"moat: duplicate skill: {skill.name}", file=sys.stderr)
+            return 1
+        skills[skill.name] = skill
 
     print(f"moat: run claude in \"{workspace.name}\" with permission mode \"{permission_mode}\"?")
     if git_write:
@@ -234,10 +247,12 @@ def main() -> int:
     cmd += ["-v", f"{state_dir}:/home/robot/.claude:rw"]
     cmd += ["-v", f"{credentials_path}:/home/robot/.claude/.credentials.json:rw"]
     cmd += ["-v", f"{claude_json_path}:/home/robot/.claude.json:rw"]
-    if skills_dir:
-        cmd += ["-v", f"{skills_dir}:/home/robot/.claude/skills:ro"]
     if claude_md:
         cmd += ["-v", f"{claude_md}:/home/robot/.claude/CLAUDE.md:ro"]
+
+    # Skills are read-only, so any .git/ directories in them are too.
+    for name, skill in skills.items():
+        cmd += ["-v", f"{skill}:/home/robot/.claude/skills/{name}:ro"]
 
     # Mounts nested inside other mounts must come after their parent.
     cmd += ["-v", f"{workspace}:{workspace}:rw"]
