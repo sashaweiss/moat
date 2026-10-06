@@ -108,10 +108,6 @@ def main() -> int:
             return 1
         env_file = env_file_arg.resolve()
 
-    # Resolve symlinks, since a symlink's target won't exist in the VM.
-    host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
-    claude_md: Path | None = host_claude_md.resolve() if host_claude_md.is_file() else None
-
     # Mount skills individually, keyed by name, so symlinked skills work.
     skills: dict[str, Path] = {}
     host_skills_dir = Path.home() / ".claude" / "skills"
@@ -219,6 +215,15 @@ def main() -> int:
         settings["autoMemoryDirectory"] = "~/.claude/memory"
         settings_path.write_text(json.dumps(settings, indent=2))
 
+    # Populate the VM's CLAUDE.md with a prefix describing the moat environment,
+    # followed by the contents of the host's ~/.claude/CLAUDE.md.
+    claude_md_content = (Path(__file__).resolve().parent / "CLAUDE-PROLOGUE.md").read_text()
+    host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    if host_claude_md.is_file():
+        claude_md_content += "\n\n" + host_claude_md.read_text()
+    claude_md_path = moat_dir / f"{workspace_hash}.CLAUDE.md"
+    claude_md_path.write_text(claude_md_content)
+
     # For debugging purposes, write a pointer from the workspace hash back to
     # the workspace itself. This isn't mounted into the container.
     workspace_hash_hint_path = moat_dir / f"{workspace_hash}.pointer"
@@ -247,8 +252,7 @@ def main() -> int:
     cmd += ["-v", f"{state_dir}:/home/robot/.claude:rw"]
     cmd += ["-v", f"{credentials_path}:/home/robot/.claude/.credentials.json:rw"]
     cmd += ["-v", f"{claude_json_path}:/home/robot/.claude.json:rw"]
-    if claude_md:
-        cmd += ["-v", f"{claude_md}:/home/robot/.claude/CLAUDE.md:ro"]
+    cmd += ["-v", f"{claude_md_path}:/home/robot/.claude/CLAUDE.md:ro"]
 
     # Skills are read-only, so any .git/ directories in them are too.
     for name, skill in skills.items():
