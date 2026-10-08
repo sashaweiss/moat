@@ -45,11 +45,66 @@ def find_git_dirs(root: Path) -> list[Path]:
     return git_dirs
 
 
+# Maps settings.json keys to their equivalent CLI flag and expected JSON type.
+MOAT_SETTINGS_FLAGS: dict[str, tuple[str, type]] = {
+    "addSkills": ("--add-skill", list),
+    "envFile": ("--env-file", str),
+    "gitAccessMode": ("--git-access-mode", str),
+    "model": ("--model", str),
+    "noSettings": ("--no-settings", bool),
+    "permissionMode": ("--permission-mode", str),
+}
+
+
+def moat_settings_argv(moat_settings_path: Path) -> list[str]:
+    """
+    Return CLI args equivalent to the settings in `moat_settings_path`, or raise
+    ValueError if it's invalid. Returns no args if the file doesn't exist.
+    """
+    if not moat_settings_path.exists():
+        return []
+    try:
+        moat_settings = json.loads(moat_settings_path.read_text())
+    except json.JSONDecodeError as e:
+        raise ValueError(f"invalid JSON in {moat_settings_path}: {e}")
+    if not isinstance(moat_settings, dict):
+        raise ValueError(f"expected a JSON object in {moat_settings_path}")
+
+    argv = []
+    for key, value in moat_settings.items():
+        if key not in MOAT_SETTINGS_FLAGS:
+            continue
+        flag, expected_type = MOAT_SETTINGS_FLAGS[key]
+        if not isinstance(value, expected_type) or (
+            isinstance(value, list) and not all(isinstance(v, str) for v in value)
+        ):
+            raise ValueError(f"invalid value for {key} in {moat_settings_path}")
+        if isinstance(value, bool):
+            if value:
+                argv += [flag]
+        elif isinstance(value, str):
+            argv += [flag, value]
+        elif isinstance(value, list):
+            argv += [arg for v in value for arg in (flag, v)]
+        else:
+            raise ValueError(f"invalid type for {key} in {moat_settings_path}")
+    return argv
+
+
 def main() -> int:
+    moat_dir = Path.home() / ".moat"
+    moat_settings_path = moat_dir / "settings.json"
+    try:
+        settings_argv = moat_settings_argv(moat_settings_path)
+    except ValueError as e:
+        print(f"moat: {e}", file=sys.stderr)
+        return 1
+
     parser = argparse.ArgumentParser(
         prog="moat",
         description="Runs Claude Code in a sandboxed VM with the given <workspace> directory mounted.",
-        epilog="Any additional arguments are forwarded to `claude` inside the container.",
+        epilog="Any additional arguments are forwarded to `claude` inside the container. "
+        f"Defaults may be set in {moat_settings_path}.",
     )
     parser.add_argument(
         "workspace",
@@ -64,6 +119,7 @@ def main() -> int:
         "--add-skill",
         metavar="DIR",
         action="append",
+        type=os.path.expanduser,
         default=[],
         help="skill directory to mount into the container, in addition to the "
         "host's ~/.claude/skills",
@@ -77,6 +133,7 @@ def main() -> int:
     parser.add_argument(
         "--env-file",
         metavar="PATH",
+        type=os.path.expanduser,
         help="file of KEY=VALUE secrets to inject as environment variables"
     )
     parser.add_argument(
@@ -89,7 +146,7 @@ def main() -> int:
         action="store_true",
         help="don't seed new sessions with the host's ~/.claude/settings.json",
     )
-    args, claude_args = parser.parse_known_args()
+    args, claude_args = parser.parse_known_args(settings_argv + sys.argv[1:])
     permission_mode = args.permission_mode
     git_write = args.git_access_mode == "write"
     model = args.model
