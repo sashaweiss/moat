@@ -56,7 +56,7 @@ moat --help
 
 ### --env-file
 
-- `--env-file` points to a `KEY=VALUE` file whose contents are injected as environment variables inside the container. Use this to inject secrets to Claude, such as API tokens.
+`--env-file` points to a `KEY=VALUE` file whose contents are injected as environment variables inside the container. Use this to inject secrets to Claude, such as API tokens.
 
 ```sh
 echo 'MY_TOKEN=lalalala' > "$HOME/.moat/tokens.env"
