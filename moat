@@ -136,23 +136,23 @@ def main() -> int:
     if answer.strip().lower() != "y":
         return 1
 
-    # Prepare a directory for moat to store state.
-    moat_dir = Path.home() / ".moat"
-    moat_dir.mkdir(parents=True, exist_ok=True)
+    # Prepare directories for moat to store state.
+    sessions_dir = moat_dir / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
 
     # Because a Mac host can't easily share auth credentials with Claude in a
     # VM because of how it uses the keychain (see: https://github.com/anthropics/claude-code/issues/1414),
     # we'll store the in-VM auth credentials in ~/.moat so we can share them
     # across moat sessions.
-    credentials_path = moat_dir / ".credentials.json"
+    credentials_path = moat_dir / "credentials.json"
     credentials_path.touch(exist_ok=True)
 
     # Prepare a per-workspace (keyed by a hash of the directory path) directory
     # where we can save the ~/.claude directories from the VM durably on the
-    # host, under ~/.moat. We'll mount this into the VM, so Claude has context
+    # host, under ~/.moat/sessions. We'll mount this into the VM, so Claude has context
     # from and can resume previous sessions in this workspace.
     workspace_hash = hashlib.sha256(str(workspace).encode()).hexdigest()[:16]
-    state_dir = moat_dir / workspace_hash
+    state_dir = sessions_dir / workspace_hash
     state_dir.mkdir(parents=True, exist_ok=True)
 
     # We'll mount the workspace in the container at the same absolute path as on
@@ -183,7 +183,7 @@ def main() -> int:
     # For first-time workspaces, write a dummy .claude.json to populate some
     # default settings (silence FRE prompts). We'll store it in the state
     # directory, then mount it into the container at ~/.claude.json.
-    claude_json_path = moat_dir / f"{workspace_hash}.claude.json"
+    claude_json_path = sessions_dir / f"{workspace_hash}.claude.json"
     if not claude_json_path.exists():
         claude_json_path.write_text(json.dumps({
             "hasCompletedOnboarding": True,
@@ -221,12 +221,12 @@ def main() -> int:
     host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
     if host_claude_md.is_file():
         claude_md_content += "\n\n" + host_claude_md.read_text()
-    claude_md_path = moat_dir / f"{workspace_hash}.CLAUDE.md"
+    claude_md_path = sessions_dir / f"{workspace_hash}.CLAUDE.md"
     claude_md_path.write_text(claude_md_content)
 
     # For debugging purposes, write a pointer from the workspace hash back to
     # the workspace itself. This isn't mounted into the container.
-    workspace_hash_hint_path = moat_dir / f"{workspace_hash}.pointer"
+    workspace_hash_hint_path = sessions_dir / f"{workspace_hash}.pointer"
     workspace_hash_hint_path.write_text(str(workspace))
 
     # If container's daemon isn't running yet, start it.
