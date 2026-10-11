@@ -92,7 +92,8 @@ def moat_settings_argv(moat_settings_path: Path) -> list[str]:
 
 
 def main() -> int:
-    moat_dir = Path.home() / ".moat"
+    claude_dir = (Path.home() / ".claude").resolve()
+    moat_dir = (Path.home() / ".moat").resolve()
     moat_settings_path = moat_dir / "settings.json"
     try:
         settings_argv = moat_settings_argv(moat_settings_path)
@@ -167,7 +168,7 @@ def main() -> int:
 
     # Mount skills individually, keyed by name, so symlinked skills work.
     skills: dict[str, Path] = {}
-    host_skills_dir = Path.home() / ".claude" / "skills"
+    host_skills_dir = claude_dir / "skills"
     if host_skills_dir.is_dir():
         for skill in host_skills_dir.iterdir():
             if skill.is_dir() and not skill.name.startswith("."):
@@ -201,7 +202,7 @@ def main() -> int:
     # VM because of how it uses the keychain (see: https://github.com/anthropics/claude-code/issues/1414),
     # we'll store the in-VM auth credentials in ~/.moat so we can share them
     # across moat sessions.
-    credentials_path = moat_dir / "credentials.json"
+    credentials_path = (moat_dir / "credentials.json").resolve()
     credentials_path.touch(exist_ok=True)
 
     # Prepare a per-workspace (keyed by a hash of the directory path) directory
@@ -209,7 +210,7 @@ def main() -> int:
     # host, under ~/.moat/sessions. We'll mount this into the VM, so Claude has context
     # from and can resume previous sessions in this workspace.
     workspace_hash = hashlib.sha256(str(workspace).encode()).hexdigest()[:16]
-    state_dir = sessions_dir / workspace_hash
+    state_dir = (sessions_dir / workspace_hash).resolve()
     state_dir.mkdir(parents=True, exist_ok=True)
 
     # We'll mount the workspace in the container at the same absolute path as on
@@ -240,7 +241,7 @@ def main() -> int:
     # For first-time workspaces, write a dummy .claude.json to populate some
     # default settings (silence FRE prompts). We'll store it in the state
     # directory, then mount it into the container at ~/.claude.json.
-    claude_json_path = sessions_dir / f"{workspace_hash}.claude.json"
+    claude_json_path = (sessions_dir / f"{workspace_hash}.claude.json").resolve()
     if not claude_json_path.exists():
         claude_json_path.write_text(json.dumps({
             "hasCompletedOnboarding": True,
@@ -257,7 +258,7 @@ def main() -> int:
     claude_settings_path = state_dir / "settings.json"
     if not claude_settings_path.exists():
         claude_settings = {}
-        host_claude_settings_path = Path.home() / ".claude" / "settings.json"
+        host_claude_settings_path = claude_dir / "settings.json"
         if not args.no_claude_settings and host_claude_settings_path.exists():
             try:
                 claude_settings = json.loads(host_claude_settings_path.read_text())
@@ -277,10 +278,10 @@ def main() -> int:
     # Populate the VM's CLAUDE.md with a prefix describing the moat environment,
     # followed by the contents of the host's ~/.claude/CLAUDE.md.
     claude_md_content = (Path(__file__).resolve().parent / "CLAUDE-PROLOGUE.md").read_text()
-    host_claude_md = Path.home() / ".claude" / "CLAUDE.md"
+    host_claude_md = claude_dir / "CLAUDE.md"
     if host_claude_md.is_file():
         claude_md_content += "\n\n" + host_claude_md.read_text()
-    claude_md_path = sessions_dir / f"{workspace_hash}.CLAUDE.md"
+    claude_md_path = (sessions_dir / f"{workspace_hash}.CLAUDE.md").resolve()
     claude_md_path.write_text(claude_md_content)
 
     # For debugging purposes, write a pointer from the workspace hash back to
