@@ -1,3 +1,6 @@
+/// The start of the VM's `~/.claude/CLAUDE.md`, describing the moat environment.
+/// The host's `~/.claude/CLAUDE.md` follows it.
+let claudePrologue = """
 # Prologue
 
 You are an agent running inside a Linux VM, talking to a user on the host machine. Your workspace directory is a shared mount with the host; otherwise, files in your VM are not visible to the host.
@@ -9,3 +12,5 @@ The VM is transient, although your session history is durably saved across VM in
 Below the following separator is the rest of the host user's `CLAUDE.md`.
 
 ---
+
+"""
