@@ -7,7 +7,7 @@
 
 A Swift Package that owns a long-running connection to a "agent in a VM" session in a subprocess, exposing tools for interacting with and administering the session.
 
-The primary API is a protocol with a concrete implementation backed by `moat`.
+The primary API is a `Session` wrapping an "agent in a VM" process. The actual backing process is swappable: `container` or another sandboxing tool.
 
 ## MoatGUI
 
