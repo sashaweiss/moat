@@ -23,3 +23,5 @@ A macOS app that uses MoatKit to provide a GUI interface to an agent-in-a-VM ses
     - This requires `MoatKit` and `MoatCLI` to use only cross-platform Swift.
 
 - Add a "release" script to archive and notarize `MoatCLI` and `MoatGUI`.
+
+- Add support to `MoatKit` and the clients for "first-time setup", which installs container (or other VM backends) and builds the VM image.
