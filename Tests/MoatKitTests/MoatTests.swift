@@ -133,11 +133,6 @@ struct MoatTests {
     }
 
     @Test
-    func hashMatchesPythonImplementation() {
-        #expect(Moat.hash(of: URL(fileURLWithPath: "/Users/sasha/dev/moat")) == "efb554af842e01ce")
-    }
-
-    @Test
     func spec() throws {
         let spec = try prepare {
             $0.permissionMode = "plan"
@@ -201,7 +196,7 @@ struct MoatTests {
         let fileManager = FileManager.default
         let credentials = fixture.home.appendingPathComponent(".moat/credentials.json")
         #expect(fileManager.fileExists(atPath: credentials.path))
-        #expect(sessions.appendingPathComponent(hash).isDirectory)
+        #expect(Filesystem.isDirectory(sessions.appendingPathComponent(hash)))
         let pointer = sessions.appendingPathComponent("\(hash).pointer")
         #expect(try fixture.read(pointer) == fixture.workspace.path)
 

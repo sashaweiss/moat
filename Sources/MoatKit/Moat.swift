@@ -23,15 +23,15 @@ public struct Moat {
     public func prepare(_ options: SessionOptions) throws -> VMLaunchSpec {
         let fileManager = FileManager.default
 
-        guard URL(fileURLWithPath: options.workspace).isDirectory else {
+        guard Filesystem.isDirectory(URL(fileURLWithPath: options.workspace)) else {
             throw MoatError.notADirectory(options.workspace)
         }
-        let workspace = URL(fileURLWithPath: options.workspace).resolvingSymlinksInPath()
+        let workspace = Filesystem.resolveSymlinks(URL(fileURLWithPath: options.workspace))
 
         var envFile: URL?
         if let envFileOption = options.envFile {
             let url = URL(fileURLWithPath: NSString(string: envFileOption).expandingTildeInPath)
-            guard url.isFile else {
+            guard Filesystem.isFile(url) else {
                 throw MoatError.notAFile(envFileOption)
             }
             envFile = url
@@ -40,24 +40,24 @@ public struct Moat {
         // Mount skills individually, keyed by name, so symlinked skills work.
         var skills: [(name: String, directory: URL)] = []
         let hostSkillsDirectory = environment.claudeDirectory.appendingPathComponent("skills")
-        if hostSkillsDirectory.isDirectory {
+        if Filesystem.isDirectory(hostSkillsDirectory) {
             let contents = try fileManager.contentsOfDirectory(
                 at: hostSkillsDirectory,
                 includingPropertiesForKeys: nil,
             )
             for skill in contents {
-                guard skill.isDirectory, !skill.lastPathComponent.hasPrefix(".") else {
+                guard Filesystem.isDirectory(skill), !skill.lastPathComponent.hasPrefix(".") else {
                     continue
                 }
-                skills.append((skill.lastPathComponent, skill.resolvingSymlinksInPath()))
+                skills.append((skill.lastPathComponent, Filesystem.resolveSymlinks(skill)))
             }
         }
         for skillOption in options.additionalSkills {
             let url = URL(fileURLWithPath: NSString(string: skillOption).expandingTildeInPath)
-            guard url.isDirectory else {
+            guard Filesystem.isDirectory(url) else {
                 throw MoatError.notADirectory(skillOption)
             }
-            let skill = url.resolvingSymlinksInPath()
+            let skill = Filesystem.resolveSymlinks(url)
             guard !skills.contains(where: { $0.name == skill.lastPathComponent }) else {
                 throw MoatError.duplicateSkill(skill.lastPathComponent)
             }
@@ -151,7 +151,7 @@ public struct Moat {
         // ~/.claude/CLAUDE.md.
         var claudeMD = claudePrologue
         let hostClaudeMDFile = claudeDirectory.appendingPathComponent("CLAUDE.md")
-        if hostClaudeMDFile.isFile {
+        if Filesystem.isFile(hostClaudeMDFile) {
             claudeMD += "\n\n" + (try String(contentsOf: hostClaudeMDFile, encoding: .utf8))
         }
         let claudeMDFile = sessionsDirectory.appendingPathComponent("\(workspaceHash).CLAUDE.md")

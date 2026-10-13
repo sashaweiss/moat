@@ -9,11 +9,12 @@ final class Fixture {
 
     init() throws {
         let fileManager = FileManager.default
-        root = fileManager.temporaryDirectory
+        let root = fileManager.temporaryDirectory
             .appendingPathComponent("MoatKitTests-\(UUID().uuidString)")
-            .resolvingSymlinksInPath()
-        home = root.appendingPathComponent("home")
-        workspace = root.appendingPathComponent("workspace")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        self.root = Filesystem.resolveSymlinks(root)
+        home = self.root.appendingPathComponent("home")
+        workspace = self.root.appendingPathComponent("workspace")
         try fileManager.createDirectory(at: home, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: workspace, withIntermediateDirectories: true)
     }
