@@ -1,6 +1,12 @@
 import ArgumentParser
+import CMoatKit
 import Foundation
 import MoatKit
+#if canImport(System)
+import System
+#else
+import SystemPackage
+#endif
 
 extension GitAccessMode: ExpressibleByArgument {}
 
@@ -72,12 +78,82 @@ struct MoatCommand: AsyncParsableCommand {
 
         try await Container.startSystemIfNeeded()
 
-        // Replace this process with `container`, so it owns the terminal
-        // (a `Process` child isn't in the terminal's foreground process
-        // group, so it can't read keyboard input).
-        let command = Container.startCommand(spec: spec)
-        execvp(command[0], command.map { strdup($0) } + [nil])
-        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .ENOENT)
+        let state = try await Self.runSession(spec: spec)
+        switch state {
+        case .exited(let code):
+            throw ExitCode(code)
+        case .signaled(let signal):
+            // As shells report it.
+            throw ExitCode(128 + signal)
+        case .failed(let description):
+            print("moat: couldn't run the VM: \(description)")
+            throw ExitCode.failure
+        case .running, .stopping:
+            preconditionFailure("The session should have exited.")
+        }
+    }
+
+    /// Runs `spec`'s VM in a `Session` attached to this process's terminal,
+    /// and returns the session's state once it exits.
+    @MainActor
+    static func runSession(spec: VMLaunchSpec) async throws -> Session.State {
+        let stdin = FileDescriptor.standardInput
+        let stdout = FileDescriptor.standardOutput
+
+        // System's `FileDescriptor` has no terminal APIs, so these take its
+        // raw value.
+        guard isatty(stdin.rawValue) == 1, isatty(stdout.rawValue) == 1 else {
+            throw ValidationError("moat must be run in a terminal.")
+        }
+        let session = try Session.start(
+            spec: spec,
+            startCommand: Container.startCommand(spec: spec),
+            stopCommand: Container.stopCommand(spec: spec),
+            size: try terminalSize(terminal: stdin),
+        )
+
+        // Ignore SIGWINCH for ourselves. Instead, handle it by telling the
+        // session to resize itself.
+        signal(SIGWINCH, SIG_IGN)
+        let windowSizeChanges = DispatchSource.makeSignalSource(
+            signal: SIGWINCH,
+            queue: .main,
+        )
+        windowSizeChanges.setEventHandler {
+            MainActor.assumeIsolated {
+                if let size = try? terminalSize(terminal: stdin) {
+                    session.resize(size)
+                }
+            }
+        }
+        windowSizeChanges.resume()
+        defer {
+            windowSizeChanges.cancel()
+        }
+
+        // Get our stdin's attributes, then set "raw" mode on them and write
+        // them back to stdin; i.e., set our stdin to "raw" mode. That lets
+        // keystrokes like Ctrl-C pass through to the VM without our terminal
+        // interpreting them.
+        var originalAttributes = termios()
+        tcgetattr(stdin.rawValue, &originalAttributes)
+        var rawAttributes = originalAttributes
+        cfmakeraw(&rawAttributes)
+        tcsetattr(stdin.rawValue, TCSANOW, &rawAttributes)
+        defer {
+            tcsetattr(stdin.rawValue, TCSANOW, &originalAttributes)
+        }
+
+        // Reading blocks until there's input, so it gets its own thread.
+        Thread.detachNewThread {
+            relayInput(input: stdin, session: session)
+        }
+
+        for try await chunk in session.outputStream {
+            try stdout.writeAll(chunk)
+        }
+        await session.waitForExit()
+        return session.state
     }
 
     /// Returns session options from `settings`, overridden by command-line
@@ -103,5 +179,42 @@ struct MoatCommand: AsyncParsableCommand {
         }
         options.claudeArguments = claudeArguments
         return options
+    }
+}
+
+/// Returns the size of `terminal`.
+private func terminalSize(terminal: FileDescriptor) throws -> TerminalSize {
+    var windowSize = winsize()
+    guard ioctl(terminal.rawValue, kTIOCGWINSZ, &windowSize) == 0 else {
+        throw Errno(rawValue: errno)
+    }
+    return TerminalSize(
+        columns: Int(windowSize.ws_col),
+        rows: Int(windowSize.ws_row),
+    )
+}
+
+/// Sends what's read from `input` to `session` until there's no more.
+private func relayInput(
+    input: FileDescriptor,
+    session: Session,
+    bufferSize: Int = 1024,
+) {
+    var buffer = [UInt8](repeating: 0, count: bufferSize)
+    do {
+        while true {
+            // Returns as soon as any bytes are available, and at most
+            // `buffer.count` of them.
+            let count = try buffer.withUnsafeMutableBytes { bytes in
+                try input.read(into: bytes)
+            }
+            guard count > 0 else {
+                break
+            }
+            session.write(buffer[..<count])
+        }
+    } catch {
+        // Our input is gone (e.g., its terminal closed), so there's nothing
+        // more to send.
     }
 }

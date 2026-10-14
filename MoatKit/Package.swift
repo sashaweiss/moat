@@ -36,8 +36,15 @@ let package = Package(
         .executableTarget(
             name: "MoatCLI",
             dependencies: [
+                "CMoatKit",
                 "MoatKit",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                // Apple platforms have System in the SDK.
+                .product(
+                    name: "SystemPackage",
+                    package: "swift-system",
+                    condition: .when(platforms: [.linux]),
+                ),
             ],
         ),
         .testTarget(

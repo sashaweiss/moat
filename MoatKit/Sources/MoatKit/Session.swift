@@ -133,8 +133,9 @@ public final class Session {
         try? terminal.close()
     }
 
-    /// Sends `bytes` (e.g., keyboard input) to the VM.
-    public func write(_ bytes: ArraySlice<UInt8>) {
+    /// Sends `bytes` (e.g., keyboard input) to the VM. Can be called from any
+    /// thread; writes happen in the order they're called.
+    public nonisolated func write(_ bytes: ArraySlice<UInt8>) {
         // Writing blocks, so it gets its own queue.
         writeQueue.async {
             _ = try? self.terminal.writeAll(bytes)

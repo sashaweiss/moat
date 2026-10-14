@@ -2,5 +2,10 @@
 
 #include <sys/ioctl.h>
 
-/// TIOCSWINSZ, which Swift doesn't import because it's a function-like macro.
+// Swift doesn't import these, because they're function-like macros.
+
+/// TIOCGWINSZ, to get a terminal's window size.
+static const unsigned long kTIOCGWINSZ = TIOCGWINSZ;
+
+/// TIOCSWINSZ, to set a terminal's window size.
 static const unsigned long kTIOCSWINSZ = TIOCSWINSZ;
