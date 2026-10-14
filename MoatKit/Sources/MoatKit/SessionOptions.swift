@@ -44,7 +44,7 @@ public struct MoatSettings: Equatable, Decodable {
 
     /// Loads settings from `url`, or returns empty settings if it doesn't
     /// exist.
-    public static func load(from url: URL) throws -> MoatSettings {
+    public static func load(file url: URL) throws -> MoatSettings {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return MoatSettings()
         }
@@ -57,7 +57,7 @@ public struct MoatSettings: Equatable, Decodable {
     }
 
     /// Apply these settings to `options`.
-    public func apply(to options: inout SessionOptions) {
+    public func apply(options: inout SessionOptions) {
         if let addSkills {
             options.additionalSkills += addSkills
         }

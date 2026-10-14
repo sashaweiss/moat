@@ -15,12 +15,12 @@ public struct Moat {
 
     /// Loads the user's `~/.moat/settings.json`.
     public func loadSettings() throws -> MoatSettings {
-        try MoatSettings.load(from: environment.settingsFile)
+        try MoatSettings.load(file: environment.settingsFile)
     }
 
     /// Validates `options`, then prepares moat's state on disk for them,
     /// returning a spec to launch the session.
-    public func prepare(_ options: SessionOptions) throws -> VMLaunchSpec {
+    public func prepare(_ options: SessionOptions) async throws -> VMLaunchSpec {
         let fileManager = FileManager.default
 
         guard Filesystem.isDirectory(URL(fileURLWithPath: options.workspace)) else {
@@ -78,7 +78,7 @@ public struct Moat {
         // durably on the host, under ~/.moat/sessions. We'll mount this into
         // the VM, so Claude has context from and can resume previous sessions
         // in this workspace.
-        let workspaceHash = Self.hash(of: workspace)
+        let workspaceHash = Self.hash(workspace: workspace)
         let stateDirectory = sessionsDirectory.appendingPathComponent(workspaceHash)
         try fileManager.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
 
@@ -96,8 +96,11 @@ public struct Moat {
         // Also apply the git mount mode to any nested repos in the workspace
         // (e.g., independent clones), since they'd otherwise be writable via
         // the workspace mount.
-        var gitDirectories: [URL] = try Git.commonDirectory(for: workspace).map { [$0] } ?? []
-        for nested in try Git.directories(under: workspace) {
+        var gitDirectories: [URL] = []
+        if let commonDirectory = try await Git.commonDirectory(workspace: workspace) {
+            gitDirectories.append(commonDirectory)
+        }
+        for nested in try Git.directories(root: workspace) {
             if !gitDirectories.contains(where: { $0.path == nested.path }) {
                 gitDirectories.append(nested)
             }
@@ -234,7 +237,7 @@ public struct Moat {
     }
 
     /// The key for a workspace's state under `~/.moat/sessions`.
-    static func hash(of workspace: URL) -> String {
+    static func hash(workspace: URL) -> String {
         SHA256.hash(data: Data(workspace.path.utf8))
             .map { String(format: "%02x", $0) }
             .joined()

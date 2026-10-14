@@ -1,4 +1,10 @@
 import Foundation
+import Subprocess
+#if canImport(System)
+import System
+#else
+import SystemPackage
+#endif
 @testable import MoatKit
 
 /// A scratch directory with a fake home and workspace, removed on deinit.
@@ -36,14 +42,14 @@ final class Fixture {
     }
 
     @discardableResult
-    func makeDirectory(_ path: String, in base: URL? = nil) throws -> URL {
+    func makeDirectory(_ path: String, base: URL? = nil) throws -> URL {
         let url = (base ?? root).appendingPathComponent(path)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
 
     @discardableResult
-    func write(_ contents: String, to path: String, in base: URL? = nil) throws -> URL {
+    func write(_ contents: String, path: String, base: URL? = nil) throws -> URL {
         let url = (base ?? root).appendingPathComponent(path)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
@@ -61,10 +67,15 @@ final class Fixture {
         try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! NSDictionary
     }
 
-    func git(_ arguments: String..., in directory: URL) throws {
-        let status = try run(["git"] + arguments, in: directory)
-        guard status == 0 else {
-            throw MoatError.commandFailed(["git"] + arguments, status: status)
+    func git(_ arguments: String..., directory: URL) async throws {
+        let result = try await run(
+            .name("git"),
+            arguments: Arguments(arguments),
+            workingDirectory: FilePath(directory.path),
+            output: .discarded,
+        )
+        guard result.terminationStatus.isSuccess else {
+            throw MoatError.commandFailed(["git"] + arguments, status: result.terminationStatus)
         }
     }
 }

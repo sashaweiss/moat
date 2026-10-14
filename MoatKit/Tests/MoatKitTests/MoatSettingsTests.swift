@@ -10,13 +10,13 @@ struct MoatSettingsTests {
     }
 
     func load(_ json: String) throws -> MoatSettings {
-        try MoatSettings.load(from: fixture.write(json, to: "settings.json"))
+        try MoatSettings.load(file: fixture.write(json, path: "settings.json"))
     }
 
     @Test
     func missingFileIsEmpty() throws {
         let missing = fixture.root.appendingPathComponent("missing.json")
-        let settings = try MoatSettings.load(from: missing)
+        let settings = try MoatSettings.load(file: missing)
         #expect(settings == MoatSettings())
     }
 
@@ -67,7 +67,7 @@ struct MoatSettingsTests {
 
         var options = SessionOptions(workspace: "/w")
         options.additionalSkills = ["~/cli-skill"]
-        settings.apply(to: &options)
+        settings.apply(options: &options)
 
         #expect(options.additionalSkills == ["~/cli-skill", "~/settings-skill"])
         #expect(options.model == "sonnet")
@@ -79,7 +79,7 @@ struct MoatSettingsTests {
     @Test
     func applyEmptySettingsChangesNothing() {
         var options = SessionOptions(workspace: "/w")
-        MoatSettings().apply(to: &options)
+        MoatSettings().apply(options: &options)
         #expect(options == SessionOptions(workspace: "/w"))
     }
 }

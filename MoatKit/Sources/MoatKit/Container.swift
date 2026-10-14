@@ -1,21 +1,42 @@
 import Foundation
+import Subprocess
 
 /// Runs agent VMs using Apple's `container` tool.
 public enum Container {
     /// Starts `container`'s daemon if it isn't running yet.
-    public static func startSystemIfNeeded() throws {
-        if try run(["container", "system", "status"]) != 0 {
-            let start = ["container", "system", "start"]
-            let status = try run(start, standardOutput: nil, standardError: nil)
-            if status != 0 {
-                throw MoatError.commandFailed(start, status: status)
-            }
+    public static func startSystemIfNeeded() async throws {
+        let systemStatus = try await run(
+            .name("container"),
+            arguments: ["system", "status"],
+            output: .discarded,
+        )
+        if systemStatus.terminationStatus.isSuccess {
+            return
         }
+        // This may prompt (e.g., to install a kernel), so give it our terminal, if any.
+        let start = try await run(
+            .name("container"),
+            arguments: ["system", "start"],
+            input: .currentStandardInput,
+            output: .currentStandardOutput,
+            error: .currentStandardError,
+        )
+        if !start.terminationStatus.isSuccess {
+            throw MoatError.commandFailed(
+                ["container", "system", "start"],
+                status: start.terminationStatus,
+            )
+        }
+    }
+
+    /// Returns the command (starting with `container`) that stops `spec`'s VM.
+    public static func stopCommand(spec: VMLaunchSpec) -> [String] {
+        ["container", "stop", spec.name]
     }
 
     /// Returns the command (starting with `container`) that launches `spec`
     /// interactively in the current terminal.
-    public static func runCommand(for spec: VMLaunchSpec) -> [String] {
+    public static func startCommand(spec: VMLaunchSpec) -> [String] {
         var command = [
             "container",
             "run",

@@ -1,11 +1,12 @@
 import Foundation
+import Subprocess
 
 public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError {
     case notADirectory(String)
     case notAFile(String)
     case duplicateSkill(String)
     case invalidSettingsFile(String)
-    case commandFailed([String], status: Int32)
+    case commandFailed([String], status: TerminationStatus)
 
     public var description: String {
         switch self {
@@ -18,7 +19,7 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
         case .invalidSettingsFile(let path):
             "invalid settings file: \(path)"
         case .commandFailed(let argv, let status):
-            "`\(argv.joined(separator: " "))` failed with exit status \(status)"
+            "`\(argv.joined(separator: " "))` failed: \(status)"
         }
     }
 

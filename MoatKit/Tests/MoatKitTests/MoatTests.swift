@@ -14,127 +14,129 @@ struct MoatTests {
     }
 
     var hash: String {
-        Moat.hash(of: fixture.workspace)
+        Moat.hash(workspace: fixture.workspace)
     }
 
     var claudeSettingsFile: URL {
         sessions.appendingPathComponent("\(hash)/settings.json")
     }
 
-    func prepare(_ configure: (inout SessionOptions) -> Void = { _ in }) throws -> VMLaunchSpec {
+    func prepare(
+        _ configure: (inout SessionOptions) -> Void = { _ in },
+    ) async throws -> VMLaunchSpec {
         var options = fixture.options
         configure(&options)
-        return try fixture.moat().prepare(options)
+        return try await fixture.moat().prepare(options)
     }
 
     /// The (name, source path) of each skill mounted by `spec`.
-    func skills(in spec: VMLaunchSpec) -> [(String, String)] {
+    func skills(spec: VMLaunchSpec) -> [(String, String)] {
         spec.mounts
             .filter { $0.destination.hasPrefix("/home/robot/.claude/skills/") }
             .map { (URL(fileURLWithPath: $0.destination).lastPathComponent, $0.source.path) }
     }
 
     @Test
-    func defaults() throws {
-        let spec = try prepare()
+    func defaults() async throws {
+        let spec = try await prepare()
         #expect(spec.envFile == nil)
-        #expect(skills(in: spec).isEmpty)
+        #expect(skills(spec: spec).isEmpty)
         #expect(spec.command == ["claude", "--permission-mode", "auto", "--model", "opus"])
     }
 
     @Test
-    func resolvesWorkspaceSymlink() throws {
+    func resolvesWorkspaceSymlink() async throws {
         let link = fixture.root.appendingPathComponent("link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fixture.workspace)
-        let spec = try prepare { $0.workspace = link.path }
+        let spec = try await prepare { $0.workspace = link.path }
         #expect(spec.workingDirectory == fixture.workspace.path)
     }
 
     @Test
-    func workspaceMustBeADirectory() throws {
-        let file = try fixture.write("", to: "file")
-        #expect(throws: MoatError.notADirectory(file.path)) {
-            try prepare { $0.workspace = file.path }
+    func workspaceMustBeADirectory() async throws {
+        let file = try fixture.write("", path: "file")
+        await #expect(throws: MoatError.notADirectory(file.path)) {
+            try await prepare { $0.workspace = file.path }
         }
-        #expect(throws: MoatError.notADirectory("/nonexistent")) {
-            try prepare { $0.workspace = "/nonexistent" }
+        await #expect(throws: MoatError.notADirectory("/nonexistent")) {
+            try await prepare { $0.workspace = "/nonexistent" }
         }
     }
 
     @Test
-    func invalidOptionsDoNotWriteState() throws {
-        #expect(throws: MoatError.self) {
-            try prepare { $0.workspace = "/nonexistent" }
+    func invalidOptionsDoNotWriteState() async throws {
+        await #expect(throws: MoatError.self) {
+            try await prepare { $0.workspace = "/nonexistent" }
         }
         let moat = fixture.home.appendingPathComponent(".moat")
         #expect(!FileManager.default.fileExists(atPath: moat.path))
     }
 
     @Test
-    func envFile() throws {
-        let envFile = try fixture.write("A=1", to: "tokens.env")
-        let spec = try prepare { $0.envFile = envFile.path }
+    func envFile() async throws {
+        let envFile = try fixture.write("A=1", path: "tokens.env")
+        let spec = try await prepare { $0.envFile = envFile.path }
         #expect(spec.envFile?.path == envFile.path)
     }
 
     @Test
-    func envFileMustBeAFile() throws {
+    func envFileMustBeAFile() async throws {
         let missing = fixture.root.appendingPathComponent("missing.env").path
-        #expect(throws: MoatError.notAFile(missing)) {
-            try prepare { $0.envFile = missing }
+        await #expect(throws: MoatError.notAFile(missing)) {
+            try await prepare { $0.envFile = missing }
         }
-        #expect(throws: MoatError.notAFile(fixture.workspace.path)) {
-            try prepare { $0.envFile = fixture.workspace.path }
+        await #expect(throws: MoatError.notAFile(fixture.workspace.path)) {
+            try await prepare { $0.envFile = fixture.workspace.path }
         }
     }
 
     @Test
-    func hostSkillsAreFiltered() throws {
-        let hostSkills = try fixture.makeDirectory(".claude/skills", in: fixture.home)
-        try fixture.makeDirectory("zeta", in: hostSkills)
-        try fixture.makeDirectory("alpha", in: hostSkills)
-        try fixture.makeDirectory(".hidden", in: hostSkills)
-        try fixture.write("", to: "not-a-skill.md", in: hostSkills)
+    func hostSkillsAreFiltered() async throws {
+        let hostSkills = try fixture.makeDirectory(".claude/skills", base: fixture.home)
+        try fixture.makeDirectory("zeta", base: hostSkills)
+        try fixture.makeDirectory("alpha", base: hostSkills)
+        try fixture.makeDirectory(".hidden", base: hostSkills)
+        try fixture.write("", path: "not-a-skill.md", base: hostSkills)
         let linkedSkill = try fixture.makeDirectory("elsewhere/linked")
         try FileManager.default.createSymbolicLink(
             at: hostSkills.appendingPathComponent("linked"),
             withDestinationURL: linkedSkill,
         )
 
-        let skills = Dictionary(uniqueKeysWithValues: skills(in: try prepare()))
+        let skills = Dictionary(uniqueKeysWithValues: skills(spec: try await prepare()))
         #expect(skills.keys.sorted() == ["alpha", "linked", "zeta"])
         #expect(skills["linked"] == linkedSkill.path)
     }
 
     @Test
-    func additionalSkills() throws {
-        try fixture.makeDirectory(".claude/skills/host", in: fixture.home)
+    func additionalSkills() async throws {
+        try fixture.makeDirectory(".claude/skills/host", base: fixture.home)
         let extra = try fixture.makeDirectory("extra")
-        let skills = skills(in: try prepare { $0.additionalSkills = [extra.path] })
+        let skills = skills(spec: try await prepare { $0.additionalSkills = [extra.path] })
         #expect(skills.map(\.0) == ["host", "extra"])
         #expect(skills[1].1 == extra.path)
     }
 
     @Test
-    func additionalSkillMustBeADirectory() throws {
+    func additionalSkillMustBeADirectory() async throws {
         let missing = fixture.root.appendingPathComponent("missing").path
-        #expect(throws: MoatError.notADirectory(missing)) {
-            try prepare { $0.additionalSkills = [missing] }
+        await #expect(throws: MoatError.notADirectory(missing)) {
+            try await prepare { $0.additionalSkills = [missing] }
         }
     }
 
     @Test
-    func duplicateSkill() throws {
-        try fixture.makeDirectory(".claude/skills/dupe", in: fixture.home)
+    func duplicateSkill() async throws {
+        try fixture.makeDirectory(".claude/skills/dupe", base: fixture.home)
         let other = try fixture.makeDirectory("other/dupe")
-        #expect(throws: MoatError.duplicateSkill("dupe")) {
-            try prepare { $0.additionalSkills = [other.path] }
+        await #expect(throws: MoatError.duplicateSkill("dupe")) {
+            try await prepare { $0.additionalSkills = [other.path] }
         }
     }
 
     @Test
-    func spec() throws {
-        let spec = try prepare {
+    func spec() async throws {
+        let spec = try await prepare {
             $0.permissionMode = "plan"
             $0.model = "sonnet"
             $0.claudeArguments = ["--resume", "-c"]
@@ -158,9 +160,9 @@ struct MoatTests {
     }
 
     @Test
-    func mounts() throws {
-        try fixture.makeDirectory(".claude/skills/skill", in: fixture.home)
-        let spec = try prepare()
+    func mounts() async throws {
+        try fixture.makeDirectory(".claude/skills/skill", base: fixture.home)
+        let spec = try await prepare()
         let state = sessions.appendingPathComponent(hash)
         let moat = fixture.home.appendingPathComponent(".moat")
         let skill = fixture.home.appendingPathComponent(".claude/skills/skill")
@@ -191,8 +193,8 @@ struct MoatTests {
     }
 
     @Test
-    func writesState() throws {
-        _ = try prepare()
+    func writesState() async throws {
+        _ = try await prepare()
         let fileManager = FileManager.default
         let credentials = fixture.home.appendingPathComponent(".moat/credentials.json")
         #expect(fileManager.fileExists(atPath: credentials.path))
@@ -210,28 +212,28 @@ struct MoatTests {
     }
 
     @Test
-    func preservesExistingState() throws {
+    func preservesExistingState() async throws {
         let credentials = try fixture.write(
             "secret",
-            to: ".moat/credentials.json",
-            in: fixture.home,
+            path: ".moat/credentials.json",
+            base: fixture.home,
         )
-        let claudeJSON = try fixture.write("{}", to: "\(hash).claude.json", in: sessions)
-        let settings = try fixture.write("{}", to: "\(hash)/settings.json", in: sessions)
-        _ = try prepare()
+        let claudeJSON = try fixture.write("{}", path: "\(hash).claude.json", base: sessions)
+        let settings = try fixture.write("{}", path: "\(hash)/settings.json", base: sessions)
+        _ = try await prepare()
         #expect(try fixture.read(credentials) == "secret")
         #expect(try fixture.read(claudeJSON) == "{}")
         #expect(try fixture.read(settings) == "{}")
     }
 
     @Test
-    func seedsClaudeSettingsFromHost() throws {
+    func seedsClaudeSettingsFromHost() async throws {
         try fixture.write(
             #"{"theme": "dark", "nested": {"a": [1, true]}}"#,
-            to: ".claude/settings.json",
-            in: fixture.home,
+            path: ".claude/settings.json",
+            base: fixture.home,
         )
-        _ = try prepare()
+        _ = try await prepare()
         let settings = try fixture.readJSON(claudeSettingsFile)
         #expect(settings["theme"] as? String == "dark")
         #expect(settings["autoMemoryDirectory"] as? String == "~/.claude/memory")
@@ -239,47 +241,47 @@ struct MoatTests {
     }
 
     @Test
-    func doesNotSeedClaudeSettingsWhenDisabled() throws {
-        try fixture.write(#"{"theme": "dark"}"#, to: ".claude/settings.json", in: fixture.home)
-        _ = try prepare { $0.seedsClaudeSettings = false }
+    func doesNotSeedClaudeSettingsWhenDisabled() async throws {
+        try fixture.write(#"{"theme": "dark"}"#, path: ".claude/settings.json", base: fixture.home)
+        _ = try await prepare { $0.seedsClaudeSettings = false }
         let settings = try fixture.readJSON(claudeSettingsFile)
         #expect(settings == ["autoMemoryDirectory": "~/.claude/memory"])
     }
 
     @Test
-    func invalidHostClaudeSettings() throws {
-        let url = try fixture.write("[]", to: ".claude/settings.json", in: fixture.home)
-        #expect(throws: MoatError.invalidSettingsFile(url.path)) {
-            try prepare()
+    func invalidHostClaudeSettings() async throws {
+        let url = try fixture.write("[]", path: ".claude/settings.json", base: fixture.home)
+        await #expect(throws: MoatError.invalidSettingsFile(url.path)) {
+            try await prepare()
         }
-        try fixture.write("{", to: ".claude/settings.json", in: fixture.home)
-        #expect(throws: MoatError.invalidSettingsFile(url.path)) {
-            try prepare()
+        try fixture.write("{", path: ".claude/settings.json", base: fixture.home)
+        await #expect(throws: MoatError.invalidSettingsFile(url.path)) {
+            try await prepare()
         }
     }
 
     @Test
-    func claudeMD() throws {
+    func claudeMD() async throws {
         let prologue = claudePrologue
         #expect(prologue.hasPrefix("# Prologue"))
         let claudeMD = sessions.appendingPathComponent("\(hash).CLAUDE.md")
 
-        _ = try prepare()
+        _ = try await prepare()
         #expect(try fixture.read(claudeMD) == prologue)
 
         // Rewritten every time, to pick up changes to the host's CLAUDE.md.
-        try fixture.write("host instructions", to: ".claude/CLAUDE.md", in: fixture.home)
-        _ = try prepare()
+        try fixture.write("host instructions", path: ".claude/CLAUDE.md", base: fixture.home)
+        _ = try await prepare()
         #expect(try fixture.read(claudeMD) == prologue + "\n\nhost instructions")
     }
 
     @Test
-    func gitMountsAreReadOnlyByDefault() throws {
-        try fixture.git("init", "-q", ".", in: fixture.workspace)
-        let nested = try fixture.makeDirectory("nested", in: fixture.workspace)
-        try fixture.git("init", "-q", ".", in: nested)
+    func gitMountsAreReadOnlyByDefault() async throws {
+        try await fixture.git("init", "-q", ".", directory: fixture.workspace)
+        let nested = try fixture.makeDirectory("nested", base: fixture.workspace)
+        try await fixture.git("init", "-q", ".", directory: nested)
 
-        let spec = try prepare()
+        let spec = try await prepare()
         let gitMounts = spec.mounts.suffix(2)
         #expect(gitMounts.map(\.source.path) == [
             fixture.workspace.appendingPathComponent(".git").path,
@@ -290,19 +292,19 @@ struct MoatTests {
     }
 
     @Test
-    func gitMountsAreWritableOnRequest() throws {
-        try fixture.git("init", "-q", ".", in: fixture.workspace)
-        let spec = try prepare { $0.gitAccessMode = .write }
+    func gitMountsAreWritableOnRequest() async throws {
+        try await fixture.git("init", "-q", ".", directory: fixture.workspace)
+        let spec = try await prepare { $0.gitAccessMode = .write }
         let gitDirectory = fixture.workspace.appendingPathComponent(".git")
         #expect(spec.mounts.last?.source.path == gitDirectory.path)
         #expect(spec.mounts.last?.access == .readWrite)
     }
 
     @Test
-    func worktreeMountsCommonGitDirectory() throws {
+    func worktreeMountsCommonGitDirectory() async throws {
         let main = try fixture.makeDirectory("main")
-        try fixture.git("init", "-q", ".", in: main)
-        try fixture.git(
+        try await fixture.git("init", "-q", ".", directory: main)
+        try await fixture.git(
             "-c",
             "user.name=t",
             "-c",
@@ -312,21 +314,21 @@ struct MoatTests {
             "--allow-empty",
             "-m",
             "init",
-            in: main,
+            directory: main,
         )
         try FileManager.default.removeItem(at: fixture.workspace)
-        try fixture.git("worktree", "add", "-q", fixture.workspace.path, in: main)
+        try await fixture.git("worktree", "add", "-q", fixture.workspace.path, directory: main)
 
-        let spec = try prepare()
+        let spec = try await prepare()
         #expect(spec.mounts.last?.source.path == main.appendingPathComponent(".git").path)
         #expect(spec.mounts.last?.access == .readOnly)
     }
 
     @Test
-    func ignoresSymlinkedGitDirectories() throws {
+    func ignoresSymlinkedGitDirectories() async throws {
         let elsewhere = try fixture.makeDirectory("elsewhere")
-        try fixture.git("init", "-q", ".", in: elsewhere)
-        let nested = try fixture.makeDirectory("nested", in: fixture.workspace)
+        try await fixture.git("init", "-q", ".", directory: elsewhere)
+        let nested = try fixture.makeDirectory("nested", base: fixture.workspace)
         try FileManager.default.createSymbolicLink(
             at: nested.appendingPathComponent(".git"),
             withDestinationURL: elsewhere.appendingPathComponent(".git"),
@@ -336,13 +338,13 @@ struct MoatTests {
             withDestinationURL: elsewhere,
         )
 
-        let spec = try prepare()
+        let spec = try await prepare()
         #expect(spec.mounts.last?.source.path == fixture.workspace.path)
     }
 
     @Test
-    func noGitMountsOutsideARepo() throws {
-        let spec = try prepare()
+    func noGitMountsOutsideARepo() async throws {
+        let spec = try await prepare()
         #expect(spec.mounts.last?.source.path == fixture.workspace.path)
     }
 }

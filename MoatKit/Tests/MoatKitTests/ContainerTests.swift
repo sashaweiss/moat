@@ -29,8 +29,8 @@ struct ContainerTests {
     }
 
     @Test
-    func runCommand() {
-        #expect(Container.runCommand(for: spec()) == [
+    func startCommand() {
+        #expect(Container.startCommand(spec: spec()) == [
             "container",
             "run",
             "-it",
@@ -57,8 +57,9 @@ struct ContainerTests {
     }
 
     @Test
-    func runCommandWithEnvFile() {
-        let command = Container.runCommand(for: spec(envFile: URL(fileURLWithPath: "/tokens.env")))
+    func startCommandWithEnvFile() {
+        let envFile = URL(fileURLWithPath: "/tokens.env")
+        let command = Container.startCommand(spec: spec(envFile: envFile))
         #expect(command[12...15] == ["-w", "/ws", "--env-file", "/tokens.env"])
     }
 }

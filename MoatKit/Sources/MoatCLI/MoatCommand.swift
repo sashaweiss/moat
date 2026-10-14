@@ -5,7 +5,7 @@ import MoatKit
 extension GitAccessMode: ExpressibleByArgument {}
 
 @main
-struct MoatCommand: ParsableCommand {
+struct MoatCommand: AsyncParsableCommand {
     static var configuration: CommandConfiguration {
         CommandConfiguration(
             commandName: "moat",
@@ -50,10 +50,10 @@ struct MoatCommand: ParsableCommand {
     @Argument(parsing: .allUnrecognized, help: .hidden)
     var claudeArguments: [String] = []
 
-    func run() throws {
+    func run() async throws {
         let moat = Moat()
         let options = options(settings: try moat.loadSettings())
-        let spec = try moat.prepare(options)
+        let spec = try await moat.prepare(options)
 
         let workspaceName = URL(fileURLWithPath: spec.workingDirectory).lastPathComponent
         print("moat: run claude in \"\(workspaceName)\" with permission mode \"\(options.permissionMode)\"?")
@@ -70,12 +70,12 @@ struct MoatCommand: ParsableCommand {
             throw ExitCode.failure
         }
 
-        try Container.startSystemIfNeeded()
+        try await Container.startSystemIfNeeded()
 
         // Replace this process with `container`, so it owns the terminal
         // (a `Process` child isn't in the terminal's foreground process
         // group, so it can't read keyboard input).
-        let command = Container.runCommand(for: spec)
+        let command = Container.startCommand(spec: spec)
         execvp(command[0], command.map { strdup($0) } + [nil])
         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .ENOENT)
     }
@@ -84,7 +84,7 @@ struct MoatCommand: ParsableCommand {
     /// arguments.
     func options(settings: MoatSettings) -> SessionOptions {
         var options = SessionOptions(workspace: workspace)
-        settings.apply(to: &options)
+        settings.apply(options: &options)
         options.additionalSkills += additionalSkills
         if let permissionMode {
             options.permissionMode = permissionMode

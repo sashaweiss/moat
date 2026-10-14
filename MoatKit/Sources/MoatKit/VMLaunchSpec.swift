@@ -1,8 +1,8 @@
 import Foundation
 
 /// A directory or file on the host mounted into an agent VM.
-public struct Mount {
-    public enum Access {
+public struct Mount: Sendable {
+    public enum Access: Sendable {
         case readOnly
         case readWrite
     }
@@ -13,7 +13,7 @@ public struct Mount {
 }
 
 /// All the details needed to launch a VM and run a command.
-public struct VMLaunchSpec {
+public struct VMLaunchSpec: Sendable {
     public var name: String
     public var image: String
     public var cpus: Int
