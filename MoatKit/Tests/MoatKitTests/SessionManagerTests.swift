@@ -99,6 +99,23 @@ struct SessionManagerTests {
     }
 
     @Test
+    func migratePointers() throws {
+        let workspace = "/projects/old"
+        let hash = GuestVM.hash(workspace: URL(fileURLWithPath: workspace))
+        let pointerFile = try fixture.write(
+            workspace,
+            path: "\(hash).pointer",
+            base: sessions,
+        )
+        let sessionManager = sessionManager()
+        try sessionManager.migratePointers()
+        #expect(try sessionManager.list() == [
+            SessionMetadata(workspace: workspace, name: "old"),
+        ])
+        #expect(!FileManager.default.fileExists(atPath: pointerFile.path))
+    }
+
+    @Test
     func listFailsOnInvalidMetadata() throws {
         try writeMetadata(name: "workspace")
         let invalid = try fixture.write(

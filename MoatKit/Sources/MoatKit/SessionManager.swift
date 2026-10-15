@@ -20,6 +20,26 @@ public final class SessionManager {
         self.commands = commands
     }
 
+    /// Migrates every session in `~/.moat/sessions` that has only a
+    /// `.pointer` file, from earlier versions of moat, so `list()` includes
+    /// it.
+    public func migratePointers() throws {
+        let sessionsDirectory = environment.sessionsDirectory
+        guard Filesystem.isDirectory(sessionsDirectory) else {
+            return
+        }
+        let guestVM = GuestVM(environment: environment)
+        let pointerFiles = try FileManager.default
+            .contentsOfDirectory(
+                at: sessionsDirectory,
+                includingPropertiesForKeys: nil,
+            )
+            .filter { $0.pathExtension == "pointer" }
+        for pointerFile in pointerFiles {
+            try guestVM.migratePointer(file: pointerFile)
+        }
+    }
+
     /// Returns the metadata of every session in `~/.moat/sessions`, sorted
     /// by name.
     public func list() throws -> [SessionMetadata] {
