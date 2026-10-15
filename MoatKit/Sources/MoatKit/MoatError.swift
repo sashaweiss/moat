@@ -6,6 +6,7 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
     case notAFile(String)
     case duplicateSkill(String)
     case invalidSettingsFile(String)
+    case invalidMetadataFile(String)
     case commandFailed([String], status: TerminationStatus)
 
     public var description: String {
@@ -18,6 +19,8 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
             "duplicate skill: \(name)"
         case .invalidSettingsFile(let path):
             "invalid settings file: \(path)"
+        case .invalidMetadataFile(let path):
+            "invalid session metadata file: \(path)"
         case .commandFailed(let argv, let status):
             "`\(argv.joined(separator: " "))` failed: \(status)"
         }
