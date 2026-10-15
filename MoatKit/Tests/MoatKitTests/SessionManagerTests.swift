@@ -5,11 +5,57 @@ import Testing
 @MainActor
 struct SessionManagerTests {
     let fixture: Fixture
-    let sessionManager: SessionManager
 
     init() throws {
         fixture = try Fixture()
-        sessionManager = SessionManager(environment: fixture.environment)
+    }
+
+    /// A manager whose sessions run `start` and `stop` as their VM commands,
+    /// with `checkSystem` and `startSystem` for the system.
+    func sessionManager(
+        checkSystem: [String] = ["true"],
+        startSystem: [String] = ["false"],
+        start: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["true"] },
+        stop: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["false"] },
+    ) -> SessionManager {
+        SessionManager(
+            environment: fixture.environment,
+            commands: SessionCommands(
+                checkSystem: checkSystem,
+                startSystem: startSystem,
+                start: start,
+                stop: stop,
+            ),
+        )
+    }
+
+    /// Starts `sessionManager`'s session for the fixture's workspace.
+    func start(
+        _ sessionManager: SessionManager,
+        options: SessionOptions = SessionOptions(),
+        claudeArguments: [String] = [],
+    ) async throws -> Session {
+        try await sessionManager.start(
+            workspace: workspace,
+            options: options,
+            claudeArguments: claudeArguments,
+            size: TerminalSize(columns: 80, rows: 24),
+        )
+    }
+
+    var workspace: String {
+        fixture.workspace.path
+    }
+
+    /// Reads `session`'s output until it contains `text`.
+    func waitForOutput(_ text: String, session: Session) async throws {
+        var output: [UInt8] = []
+        for try await chunk in session.outputStream {
+            output += chunk
+            if String(decoding: output, as: UTF8.self).contains(text) {
+                return
+            }
+        }
     }
 
     var sessions: URL {
@@ -30,7 +76,7 @@ struct SessionManagerTests {
 
     @Test
     func listWithoutSessionsDirectoryIsEmpty() throws {
-        #expect(try sessionManager.list().isEmpty)
+        #expect(try sessionManager().list().isEmpty)
     }
 
     // Sorting ignores case, as Finder does, so "Gamma" comes last.
@@ -39,7 +85,7 @@ struct SessionManagerTests {
         let beta = try writeMetadata(name: "beta")
         let gamma = try writeMetadata(name: "Gamma")
         let alpha = try writeMetadata(name: "alpha")
-        #expect(try sessionManager.list() == [alpha, beta, gamma])
+        #expect(try sessionManager().list() == [alpha, beta, gamma])
     }
 
     @Test
@@ -49,7 +95,7 @@ struct SessionManagerTests {
         try fixture.write("", path: "abc.CLAUDE.md", base: sessions)
         try fixture.write("/old", path: "abc.pointer", base: sessions)
         try fixture.makeDirectory("abc", base: sessions)
-        #expect(try sessionManager.list() == [metadata])
+        #expect(try sessionManager().list() == [metadata])
     }
 
     @Test
@@ -61,7 +107,121 @@ struct SessionManagerTests {
             base: sessions,
         )
         #expect(throws: MoatError.invalidMetadataFile(invalid.path)) {
-            try sessionManager.list()
+            try sessionManager().list()
         }
+    }
+
+    @Test
+    func startRunsSession() async throws {
+        let sessionManager = sessionManager(
+            start: { _ in ["sh", "-c", "echo started; read line"] },
+        )
+        let session = try await start(sessionManager)
+        #expect(sessionManager.sessions[session.spec.name] === session)
+        #expect(sessionManager.session(workspace: workspace) === session)
+        try await waitForOutput("started", session: session)
+
+        session.write(ArraySlice("\r".utf8))
+        await session.waitForExit()
+        #expect(session.state == .exited(code: 0))
+    }
+
+    @Test
+    func startUsesOptionsAndClaudeArguments() async throws {
+        // The VM command prints the parts of the spec it's given.
+        let sessionManager = sessionManager(start: { spec in
+            ["echo", spec.memory] + spec.command
+        })
+        var options = SessionOptions()
+        options.memory = "8G"
+        let session = try await start(
+            sessionManager,
+            options: options,
+            claudeArguments: ["--resume"],
+        )
+
+        var outputBytes: [UInt8] = []
+        for try await chunk in session.outputStream {
+            outputBytes += chunk
+        }
+        let output = String(decoding: outputBytes, as: UTF8.self)
+        #expect(output.contains("8G claude"))
+        #expect(output.contains("--resume"))
+    }
+
+    @Test
+    func startStartsSystemIfNeeded() async throws {
+        let marker = fixture.root.appendingPathComponent("system-started")
+        let sessionManager = sessionManager(
+            checkSystem: ["false"],
+            startSystem: ["touch", marker.path],
+        )
+        let session = try await start(sessionManager)
+        await session.waitForExit()
+        #expect(Filesystem.isFile(marker))
+    }
+
+    @Test
+    func sessionFailsIfSystemDoesNotStart() async throws {
+        let sessionManager = sessionManager(
+            checkSystem: ["false"],
+            startSystem: ["false"],
+        )
+        let session = try await start(sessionManager)
+        await session.waitForExit()
+        switch session.state {
+        case .failed:
+            break
+        case .running, .stopping, .exited, .signaled:
+            Issue.record("Unexpected state: \(session.state)")
+        }
+    }
+
+    @Test
+    func startFailsIfAlreadyRunning() async throws {
+        let sessionManager = sessionManager(start: { _ in
+            ["sh", "-c", "read line"]
+        })
+        let session = try await start(sessionManager)
+        await #expect(throws: MoatError.sessionAlreadyRunning(workspace)) {
+            try await start(sessionManager)
+        }
+
+        session.write(ArraySlice("\r".utf8))
+        await session.waitForExit()
+    }
+
+    @Test
+    func startAgainAfterExit() async throws {
+        let sessionManager = sessionManager()
+        let first = try await start(sessionManager)
+        await first.waitForExit()
+
+        let second = try await start(sessionManager)
+        #expect(second !== first)
+        #expect(sessionManager.session(workspace: workspace) === second)
+        await second.waitForExit()
+    }
+
+    @Test
+    func stopStopsSession() async throws {
+        let pidFile = fixture.root.appendingPathComponent("pid")
+        let sessionManager = sessionManager(
+            start: { _ in
+                [
+                    "sh",
+                    "-c",
+                    "echo $$ > '\(pidFile.path)'; echo ready; exec sleep 100",
+                ]
+            },
+            stop: { _ in
+                ["sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"]
+            },
+        )
+        let session = try await start(sessionManager)
+        try await waitForOutput("ready", session: session)
+
+        try await sessionManager.stop(workspace: workspace)
+        #expect(session.state == .signaled(signal: SIGTERM))
     }
 }

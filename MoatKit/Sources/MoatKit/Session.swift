@@ -50,8 +50,6 @@ public final class Session {
     }
 
     public let spec: VMLaunchSpec
-    /// Manipulate the VM.
-    private let commands: SessionCommands
     public private(set) var state: State = .running
 
     /// Bytes the VM writes to the terminal. Finishes once the VM exits and its output is drained.
@@ -73,11 +71,14 @@ public final class Session {
     @ObservationIgnored
     private var vmTask: Task<Void, Never>?
 
-    /// Runs `commands.start` on a new pseudo-terminal of `size`. `stop()` runs
-    /// `commands.stop`.
-    public static func start(
+    /// Runs `startCommand` on a new pseudo-terminal of `size`, after running
+    /// `startSystemCommand` there if `checkSystemCommand` fails. Each command
+    /// is looked up on `PATH`.
+    static func start(
         spec: VMLaunchSpec,
-        commands: SessionCommands,
+        checkSystemCommand: [String],
+        startSystemCommand: [String],
+        startCommand: [String],
         size: TerminalSize,
     ) throws -> Session {
         var windowSize = windowSize(for: size)
@@ -97,13 +98,14 @@ public final class Session {
 
         let session = Session(
             spec: spec,
-            commands: commands,
             terminal: FileDescriptor(rawValue: terminal),
         )
 
         // Start the VM session.
         session.start(
-            command: commands.start,
+            checkSystemCommand: checkSystemCommand,
+            startSystemCommand: startSystemCommand,
+            startCommand: startCommand,
             child: FileDescriptor(rawValue: child),
         )
 
@@ -117,11 +119,9 @@ public final class Session {
 
     private init(
         spec: VMLaunchSpec,
-        commands: SessionCommands,
         terminal: FileDescriptor,
     ) {
         self.spec = spec
-        self.commands = commands
         self.terminal = terminal
         (outputStream, outputContinuation) = AsyncThrowingStream.makeStream(of: ArraySlice<UInt8>.self)
         (vmSignalStream, vmSignalContinuation) = AsyncStream.makeStream(of: VMSignal.self)
@@ -147,9 +147,10 @@ public final class Session {
         vmSignalContinuation.yield(.windowSizeChange)
     }
 
-    /// Stops the VM and waits for it to exit.
+    /// Stops the VM by running `command` (looked up on `PATH`), and waits
+    /// for it to exit.
     /// - Note: if stopping fails, `state` remains `.running`.
-    public func stop() async throws {
+    func stop(command: [String]) async throws {
         switch state {
         case .running:
             state = .stopping
@@ -160,14 +161,14 @@ public final class Session {
 
         do {
             let result = try await Subprocess.run(
-                .name(commands.stop[0]),
-                arguments: Arguments(Array(commands.stop.dropFirst())),
+                .name(command[0]),
+                arguments: Arguments(Array(command.dropFirst())),
                 output: .discarded,
             )
 
             guard result.terminationStatus.isSuccess else {
                 throw MoatError.commandFailed(
-                    commands.stop,
+                    command,
                     status: result.terminationStatus,
                 )
             }
@@ -192,30 +193,50 @@ public final class Session {
 
     // MARK: -
 
-    /// Starts `vmTask`, which runs `command` via `runVM(startCommand:child:)`
-    /// and sets `state` once it exits.
+    /// Starts `vmTask`, which runs the VM via `runVM(...)` and sets `state`
+    /// once it exits.
     private func start(
-        command: [String],
+        checkSystemCommand: [String],
+        startSystemCommand: [String],
+        startCommand: [String],
         child: FileDescriptor,
     ) {
         precondition(vmTask == nil)
 
         vmTask = Task {
             state = await runVM(
-                startCommand: command,
+                checkSystemCommand: checkSystemCommand,
+                startSystemCommand: startSystemCommand,
+                startCommand: startCommand,
                 child: child,
             )
         }
     }
 
-    /// Runs `startCommand` with `child` as its stdio until it exits, handling
-    /// `vmSignalStream` for it. Closes `child` once it's copied by the started
-    /// command.
+    /// Runs `startSystemCommand` if `checkSystemCommand` fails, then runs
+    /// `startCommand` with `child` as its stdio until it exits, handling
+    /// `vmSignalStream` for it. Closes `child`.
     @concurrent
     private func runVM(
+        checkSystemCommand: [String],
+        startSystemCommand: [String],
         startCommand: [String],
         child stdio: FileDescriptor,
     ) async -> State {
+        do {
+            try await Self.startSystemIfNeeded(
+                checkSystemCommand: checkSystemCommand,
+                startSystemCommand: startSystemCommand,
+                stdio: stdio,
+            )
+        } catch {
+            // The VM won't start, so close our copy of its terminal here;
+            // otherwise the pseudo-terminal stays open, and `outputStream`
+            // never finishes.
+            try? stdio.close()
+            return .failed(description: String(describing: error))
+        }
+
         var platformOptions = PlatformOptions()
         // Give the VM process its own session, so it doesn't share our
         // controlling terminal if we have one.
@@ -247,6 +268,39 @@ public final class Session {
             }
         } catch {
             return .failed(description: String(describing: error))
+        }
+    }
+
+    /// Runs `startSystemCommand` if `checkSystemCommand` fails. Starting the
+    /// system may prompt (e.g., to install a component), so it runs with
+    /// `stdio`, the session's terminal.
+    @concurrent
+    private static func startSystemIfNeeded(
+        checkSystemCommand: [String],
+        startSystemCommand: [String],
+        stdio: FileDescriptor,
+    ) async throws {
+        let check = try await Subprocess.run(
+            .name(checkSystemCommand[0]),
+            arguments: Arguments(Array(checkSystemCommand.dropFirst())),
+            output: .discarded,
+        )
+        if check.terminationStatus.isSuccess {
+            return
+        }
+
+        let start = try await Subprocess.run(
+            .name(startSystemCommand[0]),
+            arguments: Arguments(Array(startSystemCommand.dropFirst())),
+            input: .fileDescriptor(stdio, closeAfterSpawningProcess: false),
+            output: .fileDescriptor(stdio, closeAfterSpawningProcess: false),
+            error: .fileDescriptor(stdio, closeAfterSpawningProcess: false),
+        )
+        if !start.terminationStatus.isSuccess {
+            throw MoatError.commandFailed(
+                startSystemCommand,
+                status: start.terminationStatus,
+            )
         }
     }
 

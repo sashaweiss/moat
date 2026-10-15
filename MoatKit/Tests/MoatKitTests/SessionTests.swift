@@ -19,15 +19,13 @@ struct SessionTests {
 
     func start(
         _ script: String,
-        stopCommand: [String] = ["false"],
         size: TerminalSize,
     ) throws -> Session {
         try Session.start(
             spec: spec,
-            commands: SessionCommands(
-                start: ["sh", "-c", script],
-                stop: stopCommand,
-            ),
+            checkSystemCommand: ["true"],
+            startSystemCommand: ["true"],
+            startCommand: ["sh", "-c", script],
             size: size,
         )
     }
@@ -96,12 +94,13 @@ struct SessionTests {
         }
         let session = try start(
             "echo $$ > '\(pidFile.path)'; echo ready; exec sleep 100",
-            stopCommand: ["sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"],
             size: TerminalSize(columns: 80, rows: 24),
         )
         try await waitForOutput("ready", session: session)
 
-        try await session.stop()
+        try await session.stop(
+            command: ["sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"],
+        )
         #expect(session.state == .signaled(signal: SIGTERM))
     }
 
@@ -114,7 +113,7 @@ struct SessionTests {
         try await waitForOutput("ready", session: session)
 
         await #expect(throws: MoatError.self) {
-            try await session.stop()
+            try await session.stop(command: ["false"])
         }
         #expect(session.state == .running)
 
@@ -124,13 +123,62 @@ struct SessionTests {
     }
 
     @Test
+    func startsSystemOnTerminal() async throws {
+        let session = try Session.start(
+            spec: spec,
+            checkSystemCommand: ["false"],
+            startSystemCommand: [
+                "sh",
+                "-c",
+                #"echo "start system?"; read answer; [ "$answer" = y ]"#,
+            ],
+            startCommand: ["sh", "-c", "echo VM started"],
+            size: TerminalSize(columns: 80, rows: 24),
+        )
+        try await waitForOutput("start system?", session: session)
+        session.write(ArraySlice("y\r".utf8))
+
+        var outputBytes: [UInt8] = []
+        for try await chunk in session.outputStream {
+            outputBytes += chunk
+        }
+        await session.waitForExit()
+        let output = String(decoding: outputBytes, as: UTF8.self)
+        #expect(output.contains("VM started"))
+        #expect(session.state == .exited(code: 0))
+    }
+
+    @Test
+    func systemStartFailure() async throws {
+        let session = try Session.start(
+            spec: spec,
+            checkSystemCommand: ["false"],
+            startSystemCommand: ["false"],
+            startCommand: ["sh", "-c", "echo VM started"],
+            size: TerminalSize(columns: 80, rows: 24),
+        )
+        var outputBytes: [UInt8] = []
+        for try await chunk in session.outputStream {
+            outputBytes += chunk
+        }
+        await session.waitForExit()
+        let output = String(decoding: outputBytes, as: UTF8.self)
+        #expect(!output.contains("VM started"))
+        switch session.state {
+        case .failed:
+            break
+        case .running, .stopping, .exited, .signaled:
+            Issue.record("Unexpected state: \(session.state)")
+        }
+    }
+
+    @Test
     func launchFailure() async throws {
         let session = try Session.start(
             spec: spec,
-            commands: SessionCommands(
-                start: ["moat-no-such-command"],
-                stop: ["false"],
-            ),
+            checkSystemCommand: ["true"],
+            startSystemCommand: ["true"],
+            startCommand: ["moat-no-such-command"],
             size: TerminalSize(columns: 80, rows: 24),
         )
         for try await _ in session.outputStream {}

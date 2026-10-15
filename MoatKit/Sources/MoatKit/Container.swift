@@ -1,41 +1,14 @@
 import Foundation
-import Subprocess
 
 /// Runs agent VMs using Apple's `container` tool.
 public enum Container {
-    /// Starts `container`'s daemon if it isn't running yet.
-    public static func startSystemIfNeeded() async throws {
-        let systemStatus = try await run(
-            .name("container"),
-            arguments: ["system", "status"],
-            output: .discarded,
-        )
-        if systemStatus.terminationStatus.isSuccess {
-            return
-        }
-        // This may prompt (e.g., to install a kernel), so give it our terminal, if any.
-        let start = try await run(
-            .name("container"),
-            arguments: ["system", "start"],
-            input: .currentStandardInput,
-            output: .currentStandardOutput,
-            error: .currentStandardError,
-        )
-        if !start.terminationStatus.isSuccess {
-            throw MoatError.commandFailed(
-                ["container", "system", "start"],
-                status: start.terminationStatus,
-            )
-        }
-    }
-
-    /// Returns the commands a `Session` uses to manipulate `spec`'s VM.
-    public static func sessionCommands(spec: VMLaunchSpec) -> SessionCommands {
-        SessionCommands(
-            start: startCommand(spec: spec),
-            stop: stopCommand(spec: spec),
-        )
-    }
+    /// The commands a `SessionManager` uses to run VMs with `container`.
+    public static let sessionCommands = SessionCommands(
+        checkSystem: ["container", "system", "status"],
+        startSystem: ["container", "system", "start"],
+        start: { spec in startCommand(spec: spec) },
+        stop: { spec in stopCommand(spec: spec) },
+    )
 
     /// Returns the command (starting with `container`) that stops `spec`'s VM.
     static func stopCommand(spec: VMLaunchSpec) -> [String] {

@@ -30,10 +30,11 @@ struct ContainerTests {
 
     @Test
     func sessionCommands() {
-        #expect(Container.sessionCommands(spec: spec()) == SessionCommands(
-            start: Container.startCommand(spec: spec()),
-            stop: ["container", "stop", "moat.ws"],
-        ))
+        let commands = Container.sessionCommands
+        #expect(commands.checkSystem == ["container", "system", "status"])
+        #expect(commands.startSystem == ["container", "system", "start"])
+        #expect(commands.start(spec()) == Container.startCommand(spec: spec()))
+        #expect(commands.stop(spec()) == ["container", "stop", "moat.ws"])
     }
 
     @Test

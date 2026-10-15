@@ -63,15 +63,17 @@ struct MoatCommand: AsyncParsableCommand {
     var claudeArguments: [String] = []
 
     func run() async throws {
-        let guestVM = GuestVM()
-        let options = options(defaults: try guestVM.loadSettings())
-        let spec = try await guestVM.prepare(
-            workspace: workspace,
-            options: options,
-            claudeArguments: claudeArguments,
+        let environment = HostEnvironment()
+        let settingsManager = await SettingsManager(environment: environment)
+        let options = options(defaults: try await settingsManager.loadSettings())
+        let sessionManager = await SessionManager(
+            environment: environment,
+            commands: Container.sessionCommands,
         )
 
-        let workspaceName = URL(fileURLWithPath: spec.workingDirectory).lastPathComponent
+        let workspaceName = URL(fileURLWithPath: workspace)
+            .standardizedFileURL
+            .lastPathComponent
         print("moat: run claude in \"\(workspaceName)\" with permission mode \"\(options.permissionMode)\"?")
         if options.gitAccessMode == .write {
             print("WARNING: claude will have write access to git!")
@@ -86,9 +88,12 @@ struct MoatCommand: AsyncParsableCommand {
             throw ExitCode.failure
         }
 
-        try await Container.startSystemIfNeeded()
-
-        let state = try await Self.runSession(spec: spec)
+        let state = try await Self.runSession(
+            sessionManager: sessionManager,
+            workspace: workspace,
+            options: options,
+            claudeArguments: claudeArguments,
+        )
         switch state {
         case .exited(let code):
             throw ExitCode(code)
@@ -103,10 +108,15 @@ struct MoatCommand: AsyncParsableCommand {
         }
     }
 
-    /// Runs `spec`'s VM in a `Session` attached to this process's terminal,
-    /// and returns the session's state once it exits.
+    /// Starts a session for `workspace` with `sessionManager`, attached to
+    /// this process's terminal, and returns its state once it exits.
     @MainActor
-    static func runSession(spec: VMLaunchSpec) async throws -> Session.State {
+    static func runSession(
+        sessionManager: SessionManager,
+        workspace: String,
+        options: SessionOptions,
+        claudeArguments: [String],
+    ) async throws -> Session.State {
         let stdin = FileDescriptor.standardInput
         let stdout = FileDescriptor.standardOutput
 
@@ -115,9 +125,11 @@ struct MoatCommand: AsyncParsableCommand {
         guard isatty(stdin.rawValue) == 1, isatty(stdout.rawValue) == 1 else {
             throw ValidationError("moat must be run in a terminal.")
         }
-        let session = try Session.start(
-            spec: spec,
-            commands: Container.sessionCommands(spec: spec),
+
+        let session = try await sessionManager.start(
+            workspace: workspace,
+            options: options,
+            claudeArguments: claudeArguments,
             size: try terminalSize(terminal: stdin),
         )
 

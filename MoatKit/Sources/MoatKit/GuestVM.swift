@@ -2,7 +2,7 @@ import Crypto
 import Foundation
 
 /// Prepares a description of the VM a moat session will run in.
-public struct GuestVM {
+public struct GuestVM: Sendable {
     public var environment: HostEnvironment
 
     static let image = "moat:latest"
@@ -11,12 +11,6 @@ public struct GuestVM {
 
     public init(environment: HostEnvironment = HostEnvironment()) {
         self.environment = environment
-    }
-
-    /// Loads the user's default session options from
-    /// `~/.moat/settings.json`.
-    public func loadSettings() throws -> SessionOptions {
-        try SessionOptions.load(file: environment.settingsFile)
     }
 
     /// Validates `workspace` and `options`, then prepares moat's state on
