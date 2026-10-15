@@ -168,10 +168,23 @@ public struct GuestVM {
         let claudeMDFile = sessionsDirectory.appendingPathComponent("\(workspaceHash).CLAUDE.md")
         try claudeMD.write(to: claudeMDFile, atomically: false, encoding: .utf8)
 
-        // For debugging purposes, write a pointer from the workspace hash back
-        // to the workspace itself. This isn't mounted into the VM.
-        let pointerFile = sessionsDirectory.appendingPathComponent("\(workspaceHash).pointer")
-        try workspace.path.write(to: pointerFile, atomically: false, encoding: .utf8)
+        // Record the session's metadata, migrating any .pointer files from
+        // earlier versions of moat.
+        let pointerFile = sessionsDirectory.appendingPathComponent(
+            "\(workspaceHash).pointer",
+        )
+        if Filesystem.isFile(pointerFile) {
+            try migratePointer(file: pointerFile)
+        }
+        let metadataFile = environment.metadataFile(
+            workspaceHash: workspaceHash,
+        )
+        let existingMetadata = try? SessionMetadata.load(file: metadataFile)
+        let metadata = SessionMetadata(
+            workspace: workspace.path,
+            name: existingMetadata?.name ?? workspace.lastPathComponent,
+        )
+        try metadata.write(file: metadataFile)
 
         let vmClaudeDirectory = "\(Self.vmHomeDirectory)/.claude"
         var mounts = [
@@ -258,6 +271,25 @@ public struct GuestVM {
             return "-"
         })
         return "moat.\(folderName).\(hash(workspace: workspace))"
+    }
+
+    /// Migrates a `<hash>.pointer` file, which holds a session's workspace
+    /// path as plain text, to `<hash>.metadata.json`. If that metadata doesn't
+    /// exist yet, it's seeded from the workspace path.
+    /// Either way, the `.pointer` file is removed.
+    func migratePointer(file pointerFile: URL) throws {
+        let workspace = try String(contentsOf: pointerFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let hash = pointerFile.deletingPathExtension().lastPathComponent
+        let metadataFile = environment.metadataFile(workspaceHash: hash)
+        if !Filesystem.isFile(metadataFile) {
+            let metadata = SessionMetadata(
+                workspace: workspace,
+                name: URL(fileURLWithPath: workspace).lastPathComponent,
+            )
+            try metadata.write(file: metadataFile)
+        }
+        try FileManager.default.removeItem(at: pointerFile)
     }
 
     /// The key for a workspace's state under `~/.moat/sessions`.

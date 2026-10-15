@@ -27,6 +27,13 @@ public struct HostEnvironment {
         moatDirectory.appendingPathComponent("sessions")
     }
 
+    /// The metadata for the session whose workspace has `workspaceHash`.
+    func metadataFile(workspaceHash: String) -> URL {
+        sessionsDirectory.appendingPathComponent(
+            "\(workspaceHash).metadata.json",
+        )
+    }
+
     // Because a Mac host can't easily share auth credentials with Claude in a
     // VM because of how it uses the keychain (see:
     // https://github.com/anthropics/claude-code/issues/1414), we'll store the

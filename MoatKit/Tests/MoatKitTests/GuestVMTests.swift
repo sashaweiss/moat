@@ -17,6 +17,10 @@ struct GuestVMTests {
         GuestVM.hash(workspace: fixture.workspace)
     }
 
+    var metadataFile: URL {
+        sessions.appendingPathComponent("\(hash).metadata.json")
+    }
+
     var claudeSettingsFile: URL {
         sessions.appendingPathComponent("\(hash)/settings.json")
     }
@@ -219,8 +223,10 @@ struct GuestVMTests {
         let credentials = fixture.home.appendingPathComponent(".moat/credentials.json")
         #expect(fileManager.fileExists(atPath: credentials.path))
         #expect(Filesystem.isDirectory(sessions.appendingPathComponent(hash)))
-        let pointer = sessions.appendingPathComponent("\(hash).pointer")
-        #expect(try fixture.read(pointer) == fixture.workspace.path)
+        #expect(try SessionMetadata.load(file: metadataFile) == SessionMetadata(
+            workspace: fixture.workspace.path,
+            name: "workspace",
+        ))
 
         let claudeJSONFile = sessions.appendingPathComponent("\(hash).claude.json")
         let claudeJSON = try fixture.readJSON(claudeJSONFile)
@@ -244,6 +250,78 @@ struct GuestVMTests {
         #expect(try fixture.read(credentials) == "secret")
         #expect(try fixture.read(claudeJSON) == "{}")
         #expect(try fixture.read(settings) == "{}")
+    }
+
+    @Test
+    func metadataKeepsName() async throws {
+        _ = try await prepare()
+        var metadata = try SessionMetadata.load(file: metadataFile)
+        metadata.name = "renamed"
+        try metadata.write(file: metadataFile)
+
+        _ = try await prepare()
+        #expect(try SessionMetadata.load(file: metadataFile).name == "renamed")
+    }
+
+    @Test
+    func migratePointerSeedsMetadata() throws {
+        let pointerFile = try fixture.write(
+            fixture.workspace.path,
+            path: "\(hash).pointer",
+            base: sessions,
+        )
+        try fixture.guestVM().migratePointer(file: pointerFile)
+
+        #expect(try SessionMetadata.load(file: metadataFile) == SessionMetadata(
+            workspace: fixture.workspace.path,
+            name: "workspace",
+        ))
+        #expect(!FileManager.default.fileExists(atPath: pointerFile.path))
+    }
+
+    @Test
+    func migratePointerKeepsExistingMetadata() throws {
+        try fixture.makeDirectory(".moat/sessions", base: fixture.home)
+        let existing = SessionMetadata(
+            workspace: fixture.workspace.path,
+            name: "renamed",
+        )
+        try existing.write(file: metadataFile)
+        let pointerFile = try fixture.write(
+            fixture.workspace.path,
+            path: "\(hash).pointer",
+            base: sessions,
+        )
+        try fixture.guestVM().migratePointer(file: pointerFile)
+
+        #expect(try SessionMetadata.load(file: metadataFile) == existing)
+        #expect(!FileManager.default.fileExists(atPath: pointerFile.path))
+    }
+
+    @Test
+    func prepareMigratesOnlyItsOwnPointer() async throws {
+        let pointerFile = try fixture.write(
+            fixture.workspace.path,
+            path: "\(hash).pointer",
+            base: sessions,
+        )
+        let other = try fixture.makeDirectory("other")
+        let otherHash = GuestVM.hash(workspace: other)
+        let otherPointerFile = try fixture.write(
+            other.path,
+            path: "\(otherHash).pointer",
+            base: sessions,
+        )
+        _ = try await prepare()
+
+        #expect(!FileManager.default.fileExists(atPath: pointerFile.path))
+        #expect(try fixture.read(otherPointerFile) == other.path)
+        let otherMetadataFile = sessions.appendingPathComponent(
+            "\(otherHash).metadata.json",
+        )
+        #expect(
+            !FileManager.default.fileExists(atPath: otherMetadataFile.path)
+        )
     }
 
     @Test
