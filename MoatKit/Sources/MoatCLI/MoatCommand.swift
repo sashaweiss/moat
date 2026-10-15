@@ -68,7 +68,9 @@ struct MoatCommand: AsyncParsableCommand {
         let options = options(defaults: try await settingsManager.loadSettings())
         let sessionManager = await SessionManager(
             environment: environment,
-            commands: Container.sessionCommands,
+            commands: Container.sessionCommands(
+                executable: options.containerPath,
+            ),
         )
 
         let workspaceName = URL(fileURLWithPath: workspace)

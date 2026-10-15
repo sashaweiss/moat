@@ -99,7 +99,10 @@ public struct GuestVM: Sendable {
         // (e.g., independent clones), since they'd otherwise be writable via
         // the workspace mount.
         var gitDirectories: [URL] = []
-        if let commonDirectory = try await Git.commonDirectory(workspace: workspace) {
+        if let commonDirectory = try await Git.commonDirectory(
+            workspace: workspace,
+            gitPath: options.gitPath,
+        ) {
             gitDirectories.append(commonDirectory)
         }
         for nested in try Git.directories(root: workspace) {

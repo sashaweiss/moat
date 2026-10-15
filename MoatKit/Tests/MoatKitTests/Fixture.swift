@@ -65,7 +65,7 @@ final class Fixture {
 
     func git(_ arguments: String..., directory: URL) async throws {
         let result = try await run(
-            .name("git"),
+            .path(FilePath("/usr/bin/git")),
             arguments: Arguments(arguments),
             workingDirectory: FilePath(directory.path),
             output: .discarded,

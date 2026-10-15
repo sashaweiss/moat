@@ -17,11 +17,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         let environment = HostEnvironment()
+        let settingsManager = SettingsManager(environment: environment)
+        let settings: SessionOptions
+        do {
+            settings = try settingsManager.loadSettings()
+        } catch {
+            Logger.error("Couldn't load settings: \(error)")
+            settings = SessionOptions()
+        }
         sessionsModel = SessionsModel(
-            settingsManager: SettingsManager(environment: environment),
+            settingsManager: settingsManager,
             sessionManager: SessionManager(
                 environment: environment,
-                commands: Container.sessionCommands,
+                commands: Container.sessionCommands(
+                    executable: settings.containerPath,
+                ),
             ),
         )
         super.init()

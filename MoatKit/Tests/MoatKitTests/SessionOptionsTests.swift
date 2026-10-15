@@ -38,6 +38,8 @@ struct SessionOptionsTests {
             "memory": "8G",
             "model": "sonnet",
             "noClaudeSettings": true,
+            "containerPath": "/opt/bin/container",
+            "gitPath": "/opt/bin/git",
             "permissionMode": "plan",
             "someFutureKey": 42
         }
@@ -49,6 +51,8 @@ struct SessionOptionsTests {
         #expect(options.memory == "8G")
         #expect(options.model == "sonnet")
         #expect(options.noClaudeSettings == true)
+        #expect(options.containerPath == "/opt/bin/container")
+        #expect(options.gitPath == "/opt/bin/git")
         #expect(options.permissionMode == "plan")
     }
 
@@ -58,6 +62,8 @@ struct SessionOptionsTests {
         #"{"model": 3}"#,
         #"{"noClaudeSettings": 1}"#,
         #"{"noClaudeSettings": "yes"}"#,
+        #"{"containerPath": 1}"#,
+        #"{"gitPath": 1}"#,
         #"{"addSkills": "~/a"}"#,
         #"{"addSkills": ["~/a", 2]}"#,
         #"{"gitAccessMode": "admin"}"#,

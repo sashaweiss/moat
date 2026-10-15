@@ -30,16 +30,26 @@ struct ContainerTests {
 
     @Test
     func sessionCommands() {
-        let commands = Container.sessionCommands
-        #expect(commands.checkSystem == ["container", "system", "status"])
-        #expect(commands.startSystem == ["container", "system", "start"])
-        #expect(commands.start(spec()) == Container.startCommand(spec: spec()))
-        #expect(commands.stop(spec()) == ["container", "stop", "moat.ws"])
+        let commands = Container.sessionCommands(executable: "/bin/container")
+        #expect(commands.checkSystem == ["/bin/container", "system", "status"])
+        #expect(commands.startSystem == ["/bin/container", "system", "start"])
+        #expect(
+            commands.start(spec())
+                == Container.startCommand(
+                    spec: spec(),
+                    executable: "/bin/container",
+                )
+        )
+        #expect(commands.stop(spec()) == ["/bin/container", "stop", "moat.ws"])
     }
 
     @Test
     func startCommand() {
-        #expect(Container.startCommand(spec: spec()) == [
+        let command = Container.startCommand(
+            spec: spec(),
+            executable: "container",
+        )
+        #expect(command == [
             "container",
             "run",
             "-it",
@@ -68,7 +78,10 @@ struct ContainerTests {
     @Test
     func startCommandWithEnvFile() {
         let envFile = URL(fileURLWithPath: "/tokens.env")
-        let command = Container.startCommand(spec: spec(envFile: envFile))
+        let command = Container.startCommand(
+            spec: spec(envFile: envFile),
+            executable: "container",
+        )
         #expect(command[12...15] == ["-w", "/ws", "--env-file", "/tokens.env"])
     }
 }

@@ -13,10 +13,10 @@ struct SessionManagerTests {
     /// A manager whose sessions run `start` and `stop` as their VM commands,
     /// with `checkSystem` and `startSystem` for the system.
     func sessionManager(
-        checkSystem: [String] = ["true"],
-        startSystem: [String] = ["false"],
-        start: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["true"] },
-        stop: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["false"] },
+        checkSystem: [String] = ["/usr/bin/true"],
+        startSystem: [String] = ["/usr/bin/false"],
+        start: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/true"] },
+        stop: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/false"] },
     ) -> SessionManager {
         SessionManager(
             environment: fixture.environment,
@@ -131,7 +131,7 @@ struct SessionManagerTests {
     @Test
     func startRunsSession() async throws {
         let sessionManager = sessionManager(
-            start: { _ in ["sh", "-c", "echo started; read line"] },
+            start: { _ in ["/bin/sh", "-c", "echo started; read line"] },
         )
         let session = try await start(sessionManager)
         #expect(sessionManager.sessions[session.spec.name] === session)
@@ -147,7 +147,7 @@ struct SessionManagerTests {
     func startUsesOptionsAndClaudeArguments() async throws {
         // The VM command prints the parts of the spec it's given.
         let sessionManager = sessionManager(start: { spec in
-            ["echo", spec.memory] + spec.command
+            ["/bin/echo", spec.memory] + spec.command
         })
         var options = SessionOptions()
         options.memory = "8G"
@@ -170,8 +170,8 @@ struct SessionManagerTests {
     func startStartsSystemIfNeeded() async throws {
         let marker = fixture.root.appendingPathComponent("system-started")
         let sessionManager = sessionManager(
-            checkSystem: ["false"],
-            startSystem: ["touch", marker.path],
+            checkSystem: ["/usr/bin/false"],
+            startSystem: ["/usr/bin/touch", marker.path],
         )
         let session = try await start(sessionManager)
         await session.waitForExit()
@@ -181,8 +181,8 @@ struct SessionManagerTests {
     @Test
     func sessionFailsIfSystemDoesNotStart() async throws {
         let sessionManager = sessionManager(
-            checkSystem: ["false"],
-            startSystem: ["false"],
+            checkSystem: ["/usr/bin/false"],
+            startSystem: ["/usr/bin/false"],
         )
         let session = try await start(sessionManager)
         await session.waitForExit()
@@ -197,7 +197,7 @@ struct SessionManagerTests {
     @Test
     func startFailsIfAlreadyRunning() async throws {
         let sessionManager = sessionManager(start: { _ in
-            ["sh", "-c", "read line"]
+            ["/bin/sh", "-c", "read line"]
         })
         let session = try await start(sessionManager)
         await #expect(throws: MoatError.sessionAlreadyRunning(workspace)) {
@@ -226,13 +226,13 @@ struct SessionManagerTests {
         let sessionManager = sessionManager(
             start: { _ in
                 [
-                    "sh",
+                    "/bin/sh",
                     "-c",
                     "echo $$ > '\(pidFile.path)'; echo ready; exec sleep 100",
                 ]
             },
             stop: { _ in
-                ["sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"]
+                ["/bin/sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"]
             },
         )
         let session = try await start(sessionManager)

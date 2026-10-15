@@ -26,6 +26,10 @@ public struct SessionOptions: Equatable, Codable, Sendable {
     /// Whether to skip seeding new sessions with the host's
     /// `~/.claude/settings.json`.
     public var noClaudeSettings: Bool = false
+    /// Path to a `container` executable.
+    public var containerPath: String = "/usr/local/bin/container"
+    /// Path to a `git` executable.
+    public var gitPath: String = "/usr/bin/git"
 
     public init() {}
 
@@ -56,6 +60,12 @@ public struct SessionOptions: Equatable, Codable, Sendable {
         noClaudeSettings = try container
             .decodeIfPresent(Bool.self, forKey: .noClaudeSettings)
             ?? noClaudeSettings
+        containerPath = try container
+            .decodeIfPresent(String.self, forKey: .containerPath)
+            ?? containerPath
+        gitPath = try container
+            .decodeIfPresent(String.self, forKey: .gitPath)
+            ?? gitPath
     }
 
     /// Loads options from `url`, or returns the defaults if it doesn't exist.

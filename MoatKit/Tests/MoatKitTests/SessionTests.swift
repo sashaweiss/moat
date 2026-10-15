@@ -23,9 +23,9 @@ struct SessionTests {
     ) throws -> Session {
         try Session.start(
             spec: spec,
-            checkSystemCommand: ["true"],
-            startSystemCommand: ["true"],
-            startCommand: ["sh", "-c", script],
+            checkSystemCommand: ["/usr/bin/true"],
+            startSystemCommand: ["/usr/bin/true"],
+            startCommand: ["/bin/sh", "-c", script],
             size: size,
         )
     }
@@ -99,7 +99,7 @@ struct SessionTests {
         try await waitForOutput("ready", session: session)
 
         try await session.stop(
-            command: ["sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"],
+            command: ["/bin/sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"],
         )
         #expect(session.state == .signaled(signal: SIGTERM))
     }
@@ -113,7 +113,7 @@ struct SessionTests {
         try await waitForOutput("ready", session: session)
 
         await #expect(throws: MoatError.self) {
-            try await session.stop(command: ["false"])
+            try await session.stop(command: ["/usr/bin/false"])
         }
         #expect(session.state == .running)
 
@@ -126,13 +126,13 @@ struct SessionTests {
     func startsSystemOnTerminal() async throws {
         let session = try Session.start(
             spec: spec,
-            checkSystemCommand: ["false"],
+            checkSystemCommand: ["/usr/bin/false"],
             startSystemCommand: [
-                "sh",
+                "/bin/sh",
                 "-c",
                 #"echo "start system?"; read answer; [ "$answer" = y ]"#,
             ],
-            startCommand: ["sh", "-c", "echo VM started"],
+            startCommand: ["/bin/sh", "-c", "echo VM started"],
             size: TerminalSize(columns: 80, rows: 24),
         )
         try await waitForOutput("start system?", session: session)
@@ -152,9 +152,9 @@ struct SessionTests {
     func systemStartFailure() async throws {
         let session = try Session.start(
             spec: spec,
-            checkSystemCommand: ["false"],
-            startSystemCommand: ["false"],
-            startCommand: ["sh", "-c", "echo VM started"],
+            checkSystemCommand: ["/usr/bin/false"],
+            startSystemCommand: ["/usr/bin/false"],
+            startCommand: ["/bin/sh", "-c", "echo VM started"],
             size: TerminalSize(columns: 80, rows: 24),
         )
         var outputBytes: [UInt8] = []
@@ -176,9 +176,9 @@ struct SessionTests {
     func launchFailure() async throws {
         let session = try Session.start(
             spec: spec,
-            checkSystemCommand: ["true"],
-            startSystemCommand: ["true"],
-            startCommand: ["moat-no-such-command"],
+            checkSystemCommand: ["/usr/bin/true"],
+            startSystemCommand: ["/usr/bin/true"],
+            startCommand: ["/nonexistent/moat-no-such-command"],
             size: TerminalSize(columns: 80, rows: 24),
         )
         for try await _ in session.outputStream {}

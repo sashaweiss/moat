@@ -2,24 +2,31 @@ import Foundation
 
 /// Runs agent VMs using Apple's `container` tool.
 public enum Container {
-    /// The commands a `SessionManager` uses to run VMs with `container`.
-    public static let sessionCommands = SessionCommands(
-        checkSystem: ["container", "system", "status"],
-        startSystem: ["container", "system", "start"],
-        start: { spec in startCommand(spec: spec) },
-        stop: { spec in stopCommand(spec: spec) },
-    )
-
-    /// Returns the command (starting with `container`) that stops `spec`'s VM.
-    static func stopCommand(spec: VMLaunchSpec) -> [String] {
-        ["container", "stop", spec.name]
+    /// Returns the commands a `SessionManager` uses to run VMs with the
+    /// `container` tool at `executable`.
+    public static func sessionCommands(executable: String) -> SessionCommands {
+        SessionCommands(
+            checkSystem: [executable, "system", "status"],
+            startSystem: [executable, "system", "start"],
+            start: { spec in startCommand(spec: spec, executable: executable) },
+            stop: { spec in stopCommand(spec: spec, executable: executable) },
+        )
     }
 
-    /// Returns the command (starting with `container`) that launches `spec`
+    /// Returns the command (starting with `executable`) that stops `spec`'s
+    /// VM.
+    static func stopCommand(spec: VMLaunchSpec, executable: String) -> [String] {
+        [executable, "stop", spec.name]
+    }
+
+    /// Returns the command (starting with `executable`) that launches `spec`
     /// interactively in the current terminal.
-    static func startCommand(spec: VMLaunchSpec) -> [String] {
+    static func startCommand(
+        spec: VMLaunchSpec,
+        executable: String,
+    ) -> [String] {
         var command = [
-            "container",
+            executable,
             "run",
             "-it",
             "--rm",

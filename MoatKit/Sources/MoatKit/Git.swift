@@ -10,9 +10,13 @@ enum Git {
     /// Returns the common .git/ directory to mount for `workspace`, or nil if
     /// `workspace` isn't inside a git repo. This is the workspace's own .git/
     /// for a normal repo, or the original repo's shared .git/ for a worktree.
-    static func commonDirectory(workspace: URL) async throws -> URL? {
+    /// Runs the `git` at `gitPath`.
+    static func commonDirectory(
+        workspace: URL,
+        gitPath: String,
+    ) async throws -> URL? {
         let result = try await run(
-            .name("git"),
+            .path(FilePath(gitPath)),
             arguments: ["rev-parse", "--path-format=absolute", "--git-common-dir"],
             workingDirectory: FilePath(workspace.path),
             output: .string(limit: Int(PATH_MAX)),

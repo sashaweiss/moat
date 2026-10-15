@@ -73,7 +73,7 @@ public final class Session {
 
     /// Runs `startCommand` on a new pseudo-terminal of `size`, after running
     /// `startSystemCommand` there if `checkSystemCommand` fails. Each command
-    /// is looked up on `PATH`.
+    /// starts with its executable's path.
     static func start(
         spec: VMLaunchSpec,
         checkSystemCommand: [String],
@@ -147,8 +147,7 @@ public final class Session {
         vmSignalContinuation.yield(.windowSizeChange)
     }
 
-    /// Stops the VM by running `command` (looked up on `PATH`), and waits
-    /// for it to exit.
+    /// Stops the VM by running `command`, and waits for it to exit.
     /// - Note: if stopping fails, `state` remains `.running`.
     func stop(command: [String]) async throws {
         switch state {
@@ -161,7 +160,7 @@ public final class Session {
 
         do {
             let result = try await Subprocess.run(
-                .name(command[0]),
+                .path(FilePath(command[0])),
                 arguments: Arguments(Array(command.dropFirst())),
                 output: .discarded,
             )
@@ -243,7 +242,7 @@ public final class Session {
         platformOptions.createSession = true
         do {
             let result = try await Subprocess.run(
-                .name(startCommand[0]),
+                .path(FilePath(startCommand[0])),
                 arguments: Arguments(Array(startCommand.dropFirst())),
                 platformOptions: platformOptions,
                 // We want our copy closed after the process is spawned and has
@@ -281,7 +280,7 @@ public final class Session {
         stdio: FileDescriptor,
     ) async throws {
         let check = try await Subprocess.run(
-            .name(checkSystemCommand[0]),
+            .path(FilePath(checkSystemCommand[0])),
             arguments: Arguments(Array(checkSystemCommand.dropFirst())),
             output: .discarded,
         )
@@ -290,7 +289,7 @@ public final class Session {
         }
 
         let start = try await Subprocess.run(
-            .name(startSystemCommand[0]),
+            .path(FilePath(startSystemCommand[0])),
             arguments: Arguments(Array(startSystemCommand.dropFirst())),
             input: .fileDescriptor(stdio, closeAfterSpawningProcess: false),
             output: .fileDescriptor(stdio, closeAfterSpawningProcess: false),

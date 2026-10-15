@@ -1,5 +1,5 @@
 /// The commands that run sessions' VMs, as provided by the tool that runs VMs
-/// (e.g., `Container`). Each is looked up on `PATH`.
+/// (e.g., `Container`). Each starts with its executable's path.
 public struct SessionCommands: Sendable {
     /// Succeeds if the tool's background system, which runs VMs, is running.
     public var checkSystem: [String]
