@@ -117,8 +117,7 @@ struct MoatCommand: AsyncParsableCommand {
         }
         let session = try Session.start(
             spec: spec,
-            startCommand: Container.startCommand(spec: spec),
-            stopCommand: Container.stopCommand(spec: spec),
+            commands: Container.sessionCommands(spec: spec),
             size: try terminalSize(terminal: stdin),
         )
 

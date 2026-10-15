@@ -29,14 +29,22 @@ public enum Container {
         }
     }
 
+    /// Returns the commands a `Session` uses to manipulate `spec`'s VM.
+    public static func sessionCommands(spec: VMLaunchSpec) -> SessionCommands {
+        SessionCommands(
+            start: startCommand(spec: spec),
+            stop: stopCommand(spec: spec),
+        )
+    }
+
     /// Returns the command (starting with `container`) that stops `spec`'s VM.
-    public static func stopCommand(spec: VMLaunchSpec) -> [String] {
+    static func stopCommand(spec: VMLaunchSpec) -> [String] {
         ["container", "stop", spec.name]
     }
 
     /// Returns the command (starting with `container`) that launches `spec`
     /// interactively in the current terminal.
-    public static func startCommand(spec: VMLaunchSpec) -> [String] {
+    static func startCommand(spec: VMLaunchSpec) -> [String] {
         var command = [
             "container",
             "run",

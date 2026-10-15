@@ -24,8 +24,10 @@ struct SessionTests {
     ) throws -> Session {
         try Session.start(
             spec: spec,
-            startCommand: ["sh", "-c", script],
-            stopCommand: stopCommand,
+            commands: SessionCommands(
+                start: ["sh", "-c", script],
+                stop: stopCommand,
+            ),
             size: size,
         )
     }
@@ -125,8 +127,10 @@ struct SessionTests {
     func launchFailure() async throws {
         let session = try Session.start(
             spec: spec,
-            startCommand: ["moat-no-such-command"],
-            stopCommand: ["false"],
+            commands: SessionCommands(
+                start: ["moat-no-such-command"],
+                stop: ["false"],
+            ),
             size: TerminalSize(columns: 80, rows: 24),
         )
         for try await _ in session.outputStream {}

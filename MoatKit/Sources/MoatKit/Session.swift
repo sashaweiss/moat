@@ -50,8 +50,8 @@ public final class Session {
     }
 
     public let spec: VMLaunchSpec
-    /// Stops the VM, causing its process to exit.
-    private let stopCommand: [String]
+    /// Manipulate the VM.
+    private let commands: SessionCommands
     public private(set) var state: State = .running
 
     /// Bytes the VM writes to the terminal. Finishes once the VM exits and its output is drained.
@@ -73,13 +73,11 @@ public final class Session {
     @ObservationIgnored
     private var vmTask: Task<Void, Never>?
 
-    /// Runs `startCommand` (looked up on `PATH`) on a new pseudo-terminal of
-    /// `size`. `stop()` runs `stopCommand`, which should cause `startCommand`
-    /// to exit.
+    /// Runs `commands.start` on a new pseudo-terminal of `size`. `stop()` runs
+    /// `commands.stop`.
     public static func start(
         spec: VMLaunchSpec,
-        startCommand: [String],
-        stopCommand: [String],
+        commands: SessionCommands,
         size: TerminalSize,
     ) throws -> Session {
         var windowSize = windowSize(for: size)
@@ -99,13 +97,13 @@ public final class Session {
 
         let session = Session(
             spec: spec,
-            stopCommand: stopCommand,
+            commands: commands,
             terminal: FileDescriptor(rawValue: terminal),
         )
 
         // Start the VM session.
         session.start(
-            command: startCommand,
+            command: commands.start,
             child: FileDescriptor(rawValue: child),
         )
 
@@ -119,11 +117,11 @@ public final class Session {
 
     private init(
         spec: VMLaunchSpec,
-        stopCommand: [String],
+        commands: SessionCommands,
         terminal: FileDescriptor,
     ) {
         self.spec = spec
-        self.stopCommand = stopCommand
+        self.commands = commands
         self.terminal = terminal
         (outputStream, outputContinuation) = AsyncThrowingStream.makeStream(of: ArraySlice<UInt8>.self)
         (vmSignalStream, vmSignalContinuation) = AsyncStream.makeStream(of: VMSignal.self)
@@ -162,13 +160,16 @@ public final class Session {
 
         do {
             let result = try await Subprocess.run(
-                .name(stopCommand[0]),
-                arguments: Arguments(Array(stopCommand.dropFirst())),
+                .name(commands.stop[0]),
+                arguments: Arguments(Array(commands.stop.dropFirst())),
                 output: .discarded,
             )
 
             guard result.terminationStatus.isSuccess else {
-                throw MoatError.commandFailed(stopCommand, status: result.terminationStatus)
+                throw MoatError.commandFailed(
+                    commands.stop,
+                    status: result.terminationStatus,
+                )
             }
 
             await waitForExit()
