@@ -50,6 +50,12 @@ struct MoatCommand: AsyncParsableCommand {
     @Option(help: "Claude model for the session; defaults to the latest Opus (default: opus)")
     var model: String?
 
+    @Option(help: "number of CPUs for the VM (default: 2)")
+    var cpus: Int?
+
+    @Option(help: "memory for the VM, e.g. 8G (default: 4G)")
+    var memory: String?
+
     @Flag(help: "don't seed new sessions with the host's ~/.claude/settings.json")
     var noClaudeSettings = false
 
@@ -173,6 +179,12 @@ struct MoatCommand: AsyncParsableCommand {
         }
         if let model {
             options.model = model
+        }
+        if let cpus {
+            options.cpus = cpus
+        }
+        if let memory {
+            options.memory = memory
         }
         if noClaudeSettings {
             options.seedsClaudeSettings = false

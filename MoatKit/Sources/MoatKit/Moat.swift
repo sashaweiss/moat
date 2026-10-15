@@ -220,8 +220,8 @@ public struct Moat {
         return VMLaunchSpec(
             name: Self.vmName(workspace: workspace),
             image: Self.image,
-            cpus: 2,
-            memory: "4G",
+            cpus: options.cpus,
+            memory: options.memory,
             user: Self.user,
             workingDirectory: workspace.path,
             envFile: envFile,

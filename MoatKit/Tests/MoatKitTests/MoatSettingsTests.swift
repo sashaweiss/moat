@@ -25,8 +25,10 @@ struct MoatSettingsTests {
         let settings = try load("""
         {
             "addSkills": ["~/a", "/b"],
+            "cpus": 4,
             "envFile": "~/tokens.env",
             "gitAccessMode": "write",
+            "memory": "8G",
             "model": "sonnet",
             "noClaudeSettings": true,
             "permissionMode": "plan",
@@ -34,8 +36,10 @@ struct MoatSettingsTests {
         }
         """)
         #expect(settings.addSkills == ["~/a", "/b"])
+        #expect(settings.cpus == 4)
         #expect(settings.envFile == "~/tokens.env")
         #expect(settings.gitAccessMode == .write)
+        #expect(settings.memory == "8G")
         #expect(settings.model == "sonnet")
         #expect(settings.noClaudeSettings == true)
         #expect(settings.permissionMode == "plan")
@@ -50,6 +54,8 @@ struct MoatSettingsTests {
         #"{"addSkills": "~/a"}"#,
         #"{"addSkills": ["~/a", 2]}"#,
         #"{"gitAccessMode": "admin"}"#,
+        #"{"cpus": "4"}"#,
+        #"{"memory": 8}"#,
     ])
     func invalid(json: String) throws {
         let url = fixture.root.appendingPathComponent("settings.json")
@@ -62,6 +68,8 @@ struct MoatSettingsTests {
     func applyOverridesDefaults() {
         var settings = MoatSettings()
         settings.addSkills = ["~/settings-skill"]
+        settings.cpus = 4
+        settings.memory = "8G"
         settings.model = "sonnet"
         settings.noClaudeSettings = true
 
@@ -70,6 +78,8 @@ struct MoatSettingsTests {
         settings.apply(options: &options)
 
         #expect(options.additionalSkills == ["~/cli-skill", "~/settings-skill"])
+        #expect(options.cpus == 4)
+        #expect(options.memory == "8G")
         #expect(options.model == "sonnet")
         #expect(options.permissionMode == "auto")
         #expect(options.gitAccessMode == .read)

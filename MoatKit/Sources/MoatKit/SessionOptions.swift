@@ -16,6 +16,10 @@ public struct SessionOptions: Equatable {
     public var model: String = "opus"
     /// Whether to mount the git directory read-only or read-write.
     public var gitAccessMode: GitAccessMode = .read
+    /// Number of CPUs for the VM.
+    public var cpus: Int = 2
+    /// Memory for the VM.
+    public var memory: String = "4G"
     /// File of KEY=VALUE secrets to inject as environment variables.
     public var envFile: String?
     /// Skill directories to mount into the VM, in addition to the host's
@@ -34,8 +38,10 @@ public struct SessionOptions: Equatable {
 /// Defaults for `SessionOptions`, read from `~/.moat/settings.json`.
 public struct MoatSettings: Equatable, Decodable {
     public var addSkills: [String]?
+    public var cpus: Int?
     public var envFile: String?
     public var gitAccessMode: GitAccessMode?
+    public var memory: String?
     public var model: String?
     public var noClaudeSettings: Bool?
     public var permissionMode: String?
@@ -61,11 +67,17 @@ public struct MoatSettings: Equatable, Decodable {
         if let addSkills {
             options.additionalSkills += addSkills
         }
+        if let cpus {
+            options.cpus = cpus
+        }
         if let envFile {
             options.envFile = envFile
         }
         if let gitAccessMode {
             options.gitAccessMode = gitAccessMode
+        }
+        if let memory {
+            options.memory = memory
         }
         if let model {
             options.model = model

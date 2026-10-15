@@ -39,6 +39,8 @@ struct MoatTests {
     @Test
     func defaults() async throws {
         let spec = try await prepare()
+        #expect(spec.cpus == 2)
+        #expect(spec.memory == "4G")
         #expect(spec.envFile == nil)
         #expect(skills(spec: spec).isEmpty)
         #expect(spec.command == ["claude", "--permission-mode", "auto", "--model", "opus"])
@@ -148,12 +150,14 @@ struct MoatTests {
         let spec = try await prepare {
             $0.permissionMode = "plan"
             $0.model = "sonnet"
+            $0.cpus = 4
+            $0.memory = "8G"
             $0.claudeArguments = ["--resume", "-c"]
         }
         #expect(spec.name == "moat.workspace.\(hash)")
         #expect(spec.image == "moat:latest")
-        #expect(spec.cpus == 2)
-        #expect(spec.memory == "4G")
+        #expect(spec.cpus == 4)
+        #expect(spec.memory == "8G")
         #expect(spec.user == "robot")
         #expect(spec.workingDirectory == fixture.workspace.path)
         #expect(spec.envFile == nil)
