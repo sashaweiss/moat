@@ -135,13 +135,22 @@ struct MoatTests {
     }
 
     @Test
+    func vmNameReplacesDisallowedCharacters() {
+        let workspace = URL(fileURLWithPath: "/projects/my.café_app")
+        let hash = Moat.hash(workspace: workspace)
+        #expect(
+            Moat.vmName(workspace: workspace) == "moat.my-caf-_app.\(hash)"
+        )
+    }
+
+    @Test
     func spec() async throws {
         let spec = try await prepare {
             $0.permissionMode = "plan"
             $0.model = "sonnet"
             $0.claudeArguments = ["--resume", "-c"]
         }
-        #expect(spec.name == "moat.workspace")
+        #expect(spec.name == "moat.workspace.\(hash)")
         #expect(spec.image == "moat:latest")
         #expect(spec.cpus == 2)
         #expect(spec.memory == "4G")

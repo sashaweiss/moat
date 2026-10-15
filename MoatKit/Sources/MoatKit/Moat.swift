@@ -218,7 +218,7 @@ public struct Moat {
         }
 
         return VMLaunchSpec(
-            name: "moat.\(workspace.lastPathComponent)",
+            name: Self.vmName(workspace: workspace),
             image: Self.image,
             cpus: 2,
             memory: "4G",
@@ -234,6 +234,22 @@ public struct Moat {
                 options.model,
             ] + options.claudeArguments,
         )
+    }
+
+    /// The name of a workspace's VM: its folder name, to be recognizable, and
+    /// its hash, to be unique. Characters other than ASCII alphanumerics, "\_",
+    /// and "-" are replaced with "-".
+    static func vmName(workspace: URL) -> String {
+        let folderName = String(workspace.lastPathComponent.map { character in
+            if !character.isASCII {
+                return "-"
+            }
+            if character.isLetter || character.isNumber || "_-".contains(character) {
+                return character
+            }
+            return "-"
+        })
+        return "moat.\(folderName).\(hash(workspace: workspace))"
     }
 
     /// The key for a workspace's state under `~/.moat/sessions`.
