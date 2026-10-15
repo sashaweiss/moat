@@ -14,6 +14,12 @@
     {
       "kind": "local",
       "path": "../MoatKit",
+    }, {
+      "kind": "remote",
+      "repository": "https://github.com/migueldeicaza/SwiftTerm",
+      "version": {
+        "up-to-next-major-version": "1.5.0",
+      },
     },
   ],
   "files": [
@@ -40,6 +46,10 @@
       "package-product-members": [
         {
           "product-name": "MoatKit",
+          "build-phase": { "build-phase": "frameworks" },
+        }, {
+          "package": "SwiftTerm",
+          "product-name": "SwiftTerm",
           "build-phase": { "build-phase": "frameworks" },
         },
       ],
