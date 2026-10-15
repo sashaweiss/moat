@@ -11,7 +11,7 @@ A Swift Package that owns a long-running connection to a "agent in a VM" session
 
 - `struct SessionCommands`: a collection of commands needed by a `Session`.
 
-- `class SessionManager`: `.shared`-style singleton responsible for sessions.
+- `class SessionManager`: Singleton responsible for sessions.
     - Uses `~/.moat/sessions` as a database of Claude Code state and session metadata.
     - Inspects `~/.moat/sessions` and uses `SessionCommands` to list sessions and their status: stopped, idle, busy, "owned by another process".
         - On launch, all sessions are "stopped" unless they appear in `container list` or equivalent as "running", in which case they are "owned by another process".
@@ -23,7 +23,7 @@ A Swift Package that owns a long-running connection to a "agent in a VM" session
     - Sessions are keyed by "absolute path of workspace".
     - "Removing" a session removes all state and metadata.
 
-- `class SettingsManager`: `.shared`-style singleton responsible for settings.
+- `class SettingsManager`: Singleton responsible for settings.
     - Reads/writes `~/.moat/settings.json`.
     - Supports rebuilding the `container` or Docker image.
     - Tracks "Claude Code version in the image".
