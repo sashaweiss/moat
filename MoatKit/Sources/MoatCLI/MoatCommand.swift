@@ -18,7 +18,7 @@ struct MoatCommand: AsyncParsableCommand {
             abstract: "Runs Claude Code in a sandboxed VM with the given <workspace> directory mounted.",
             discussion: """
             Any additional arguments are forwarded to `claude` inside the container. \
-            Defaults may be set in \(MoatEnvironment().settingsFile.path).
+            Defaults may be set in \(HostEnvironment().settingsFile.path).
             """,
         )
     }
@@ -36,7 +36,7 @@ struct MoatCommand: AsyncParsableCommand {
             valueName: "dir",
         ),
     )
-    var additionalSkills: [String] = []
+    var addSkills: [String] = []
 
     @Option(help: "mount the git directory read-only or read-write (default: read)")
     var gitAccessMode: GitAccessMode?
@@ -63,9 +63,13 @@ struct MoatCommand: AsyncParsableCommand {
     var claudeArguments: [String] = []
 
     func run() async throws {
-        let moat = Moat()
-        let options = options(settings: try moat.loadSettings())
-        let spec = try await moat.prepare(options)
+        let guestVM = GuestVM()
+        let options = options(defaults: try guestVM.loadSettings())
+        let spec = try await guestVM.prepare(
+            workspace: workspace,
+            options: options,
+            claudeArguments: claudeArguments,
+        )
 
         let workspaceName = URL(fileURLWithPath: spec.workingDirectory).lastPathComponent
         print("moat: run claude in \"\(workspaceName)\" with permission mode \"\(options.permissionMode)\"?")
@@ -162,12 +166,11 @@ struct MoatCommand: AsyncParsableCommand {
         return session.state
     }
 
-    /// Returns session options from `settings`, overridden by command-line
+    /// Returns `defaults` (from `settings.json`), overridden by command-line
     /// arguments.
-    func options(settings: MoatSettings) -> SessionOptions {
-        var options = SessionOptions(workspace: workspace)
-        settings.apply(options: &options)
-        options.additionalSkills += additionalSkills
+    func options(defaults: SessionOptions) -> SessionOptions {
+        var options = defaults
+        options.addSkills += addSkills
         if let permissionMode {
             options.permissionMode = permissionMode
         }
@@ -187,9 +190,8 @@ struct MoatCommand: AsyncParsableCommand {
             options.memory = memory
         }
         if noClaudeSettings {
-            options.seedsClaudeSettings = false
+            options.noClaudeSettings = true
         }
-        options.claudeArguments = claudeArguments
         return options
     }
 }

@@ -1,15 +1,13 @@
 import Foundation
 
-public enum GitAccessMode: String, Codable, CaseIterable {
+public enum GitAccessMode: String, Codable, CaseIterable, Sendable {
     case read
     case write
 }
 
-/// Options for a moat session, as given by the user. Paths are unvalidated
-/// and may be relative or start with `~`.
-public struct SessionOptions: Equatable {
-    /// Directory to mount as the workspace in the VM.
-    public var workspace: String
+/// Options for a moat session, as given by the user (e.g., as defaults in
+/// `~/.moat/settings.json`). Paths are unvalidated.
+public struct SessionOptions: Equatable, Codable, Sendable {
     /// Claude Code permission mode.
     public var permissionMode: String = "auto"
     /// Claude model for the session.
@@ -24,69 +22,52 @@ public struct SessionOptions: Equatable {
     public var envFile: String?
     /// Skill directories to mount into the VM, in addition to the host's
     /// `~/.claude/skills`.
-    public var additionalSkills: [String] = []
-    /// Whether to seed new sessions with the host's `~/.claude/settings.json`.
-    public var seedsClaudeSettings: Bool = true
-    /// Additional arguments forwarded to `claude` inside the VM.
-    public var claudeArguments: [String] = []
-
-    public init(workspace: String) {
-        self.workspace = workspace
-    }
-}
-
-/// Defaults for `SessionOptions`, read from `~/.moat/settings.json`.
-public struct MoatSettings: Equatable, Decodable {
-    public var addSkills: [String]?
-    public var cpus: Int?
-    public var envFile: String?
-    public var gitAccessMode: GitAccessMode?
-    public var memory: String?
-    public var model: String?
-    public var noClaudeSettings: Bool?
-    public var permissionMode: String?
+    public var addSkills: [String] = []
+    /// Whether to skip seeding new sessions with the host's
+    /// `~/.claude/settings.json`.
+    public var noClaudeSettings: Bool = false
 
     public init() {}
 
-    /// Loads settings from `url`, or returns empty settings if it doesn't
-    /// exist.
-    public static func load(file url: URL) throws -> MoatSettings {
+    /// Decodes options, using the defaults for any that are missing.
+    public init(from decoder: any Decoder) throws {
+        self.init()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        permissionMode = try container
+            .decodeIfPresent(String.self, forKey: .permissionMode)
+            ?? permissionMode
+        model = try container
+            .decodeIfPresent(String.self, forKey: .model)
+            ?? model
+        gitAccessMode = try container
+            .decodeIfPresent(GitAccessMode.self, forKey: .gitAccessMode)
+            ?? gitAccessMode
+        cpus = try container
+            .decodeIfPresent(Int.self, forKey: .cpus)
+            ?? cpus
+        memory = try container
+            .decodeIfPresent(String.self, forKey: .memory)
+            ?? memory
+        envFile = try container
+            .decodeIfPresent(String.self, forKey: .envFile)
+        addSkills = try container
+            .decodeIfPresent([String].self, forKey: .addSkills)
+            ?? addSkills
+        noClaudeSettings = try container
+            .decodeIfPresent(Bool.self, forKey: .noClaudeSettings)
+            ?? noClaudeSettings
+    }
+
+    /// Loads options from `url`, or returns the defaults if it doesn't exist.
+    public static func load(file url: URL) throws -> SessionOptions {
         guard FileManager.default.fileExists(atPath: url.path) else {
-            return MoatSettings()
+            return SessionOptions()
         }
         let data = try Data(contentsOf: url)
         do {
-            return try JSONDecoder().decode(MoatSettings.self, from: data)
+            return try JSONDecoder().decode(SessionOptions.self, from: data)
         } catch {
             throw MoatError.invalidSettingsFile(url.path)
-        }
-    }
-
-    /// Apply these settings to `options`.
-    public func apply(options: inout SessionOptions) {
-        if let addSkills {
-            options.additionalSkills += addSkills
-        }
-        if let cpus {
-            options.cpus = cpus
-        }
-        if let envFile {
-            options.envFile = envFile
-        }
-        if let gitAccessMode {
-            options.gitAccessMode = gitAccessMode
-        }
-        if let memory {
-            options.memory = memory
-        }
-        if let model {
-            options.model = model
-        }
-        if noClaudeSettings == true {
-            options.seedsClaudeSettings = false
-        }
-        if let permissionMode {
-            options.permissionMode = permissionMode
         }
     }
 }

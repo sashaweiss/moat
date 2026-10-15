@@ -29,16 +29,12 @@ final class Fixture {
         try? FileManager.default.removeItem(at: root)
     }
 
-    var environment: MoatEnvironment {
-        MoatEnvironment(homeDirectory: home)
+    var environment: HostEnvironment {
+        HostEnvironment(homeDirectory: home)
     }
 
-    func moat() -> Moat {
-        Moat(environment: environment)
-    }
-
-    var options: SessionOptions {
-        SessionOptions(workspace: workspace.path)
+    func guestVM() -> GuestVM {
+        GuestVM(environment: environment)
     }
 
     @discardableResult

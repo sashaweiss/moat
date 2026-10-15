@@ -1,7 +1,7 @@
 import Foundation
 
 /// The host directories moat reads configuration from and stores state in.
-public struct MoatEnvironment {
+public struct HostEnvironment {
     public var homeDirectory: URL
 
     public init(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {

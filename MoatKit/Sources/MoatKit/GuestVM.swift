@@ -1,32 +1,40 @@
 import Crypto
 import Foundation
 
-/// Prepares moat sessions.
-public struct Moat {
-    public var environment: MoatEnvironment
+/// Prepares a description of the VM a moat session will run in.
+public struct GuestVM {
+    public var environment: HostEnvironment
 
     static let image = "moat:latest"
     static let user = "robot"
     static let vmHomeDirectory = "/home/robot"
 
-    public init(environment: MoatEnvironment = MoatEnvironment()) {
+    public init(environment: HostEnvironment = HostEnvironment()) {
         self.environment = environment
     }
 
-    /// Loads the user's `~/.moat/settings.json`.
-    public func loadSettings() throws -> MoatSettings {
-        try MoatSettings.load(file: environment.settingsFile)
+    /// Loads the user's default session options from
+    /// `~/.moat/settings.json`.
+    public func loadSettings() throws -> SessionOptions {
+        try SessionOptions.load(file: environment.settingsFile)
     }
 
-    /// Validates `options`, then prepares moat's state on disk for them,
-    /// returning a spec to launch the session.
-    public func prepare(_ options: SessionOptions) async throws -> VMLaunchSpec {
+    /// Validates `workspace` and `options`, then prepares moat's state on
+    /// disk for them, returning a spec to launch the session. The session runs
+    /// `claude` with `claudeArguments` added.
+    public func prepare(
+        workspace workspacePath: String,
+        options: SessionOptions,
+        claudeArguments: [String],
+    ) async throws -> VMLaunchSpec {
         let fileManager = FileManager.default
 
-        guard Filesystem.isDirectory(URL(fileURLWithPath: options.workspace)) else {
-            throw MoatError.notADirectory(options.workspace)
+        guard Filesystem.isDirectory(URL(fileURLWithPath: workspacePath)) else {
+            throw MoatError.notADirectory(workspacePath)
         }
-        let workspace = Filesystem.resolveSymlinks(URL(fileURLWithPath: options.workspace))
+        let workspace = Filesystem.resolveSymlinks(
+            URL(fileURLWithPath: workspacePath),
+        )
 
         var envFile: URL?
         if let envFileOption = options.envFile {
@@ -52,7 +60,7 @@ public struct Moat {
                 skills.append((skill.lastPathComponent, Filesystem.resolveSymlinks(skill)))
             }
         }
-        for skillOption in options.additionalSkills {
+        for skillOption in options.addSkills {
             let url = URL(fileURLWithPath: NSString(string: skillOption).expandingTildeInPath)
             guard Filesystem.isDirectory(url) else {
                 throw MoatError.notADirectory(skillOption)
@@ -133,7 +141,7 @@ public struct Moat {
             var claudeSettings: [String: Any] = [:]
             let hostClaudeSettingsFile = claudeDirectory.appendingPathComponent("settings.json")
             if
-                options.seedsClaudeSettings,
+                !options.noClaudeSettings,
                 fileManager.fileExists(atPath: hostClaudeSettingsFile.path)
             {
                 let data = try Data(contentsOf: hostClaudeSettingsFile)
@@ -232,7 +240,7 @@ public struct Moat {
                 options.permissionMode,
                 "--model",
                 options.model,
-            ] + options.claudeArguments,
+            ] + claudeArguments,
         )
     }
 

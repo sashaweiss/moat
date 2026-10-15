@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MoatKit
 
-struct MoatTests {
+struct GuestVMTests {
     let fixture: Fixture
 
     init() throws {
@@ -14,19 +14,27 @@ struct MoatTests {
     }
 
     var hash: String {
-        Moat.hash(workspace: fixture.workspace)
+        GuestVM.hash(workspace: fixture.workspace)
     }
 
     var claudeSettingsFile: URL {
         sessions.appendingPathComponent("\(hash)/settings.json")
     }
 
+    /// Prepares `workspace` (by default, the fixture's) with default options
+    /// changed by `configure`.
     func prepare(
+        workspace: String? = nil,
+        claudeArguments: [String] = [],
         _ configure: (inout SessionOptions) -> Void = { _ in },
     ) async throws -> VMLaunchSpec {
-        var options = fixture.options
+        var options = SessionOptions()
         configure(&options)
-        return try await fixture.moat().prepare(options)
+        return try await fixture.guestVM().prepare(
+            workspace: workspace ?? fixture.workspace.path,
+            options: options,
+            claudeArguments: claudeArguments,
+        )
     }
 
     /// The (name, source path) of each skill mounted by `spec`.
@@ -50,7 +58,7 @@ struct MoatTests {
     func resolvesWorkspaceSymlink() async throws {
         let link = fixture.root.appendingPathComponent("link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fixture.workspace)
-        let spec = try await prepare { $0.workspace = link.path }
+        let spec = try await prepare(workspace: link.path)
         #expect(spec.workingDirectory == fixture.workspace.path)
     }
 
@@ -58,17 +66,17 @@ struct MoatTests {
     func workspaceMustBeADirectory() async throws {
         let file = try fixture.write("", path: "file")
         await #expect(throws: MoatError.notADirectory(file.path)) {
-            try await prepare { $0.workspace = file.path }
+            try await prepare(workspace: file.path)
         }
         await #expect(throws: MoatError.notADirectory("/nonexistent")) {
-            try await prepare { $0.workspace = "/nonexistent" }
+            try await prepare(workspace: "/nonexistent")
         }
     }
 
     @Test
     func invalidOptionsDoNotWriteState() async throws {
         await #expect(throws: MoatError.self) {
-            try await prepare { $0.workspace = "/nonexistent" }
+            try await prepare(workspace: "/nonexistent")
         }
         let moat = fixture.home.appendingPathComponent(".moat")
         #expect(!FileManager.default.fileExists(atPath: moat.path))
@@ -111,19 +119,19 @@ struct MoatTests {
     }
 
     @Test
-    func additionalSkills() async throws {
+    func addSkills() async throws {
         try fixture.makeDirectory(".claude/skills/host", base: fixture.home)
         let extra = try fixture.makeDirectory("extra")
-        let skills = skills(spec: try await prepare { $0.additionalSkills = [extra.path] })
+        let skills = skills(spec: try await prepare { $0.addSkills = [extra.path] })
         #expect(skills.map(\.0) == ["host", "extra"])
         #expect(skills[1].1 == extra.path)
     }
 
     @Test
-    func additionalSkillMustBeADirectory() async throws {
+    func addSkillMustBeADirectory() async throws {
         let missing = fixture.root.appendingPathComponent("missing").path
         await #expect(throws: MoatError.notADirectory(missing)) {
-            try await prepare { $0.additionalSkills = [missing] }
+            try await prepare { $0.addSkills = [missing] }
         }
     }
 
@@ -132,27 +140,26 @@ struct MoatTests {
         try fixture.makeDirectory(".claude/skills/dupe", base: fixture.home)
         let other = try fixture.makeDirectory("other/dupe")
         await #expect(throws: MoatError.duplicateSkill("dupe")) {
-            try await prepare { $0.additionalSkills = [other.path] }
+            try await prepare { $0.addSkills = [other.path] }
         }
     }
 
     @Test
     func vmNameReplacesDisallowedCharacters() {
         let workspace = URL(fileURLWithPath: "/projects/my.café_app")
-        let hash = Moat.hash(workspace: workspace)
+        let hash = GuestVM.hash(workspace: workspace)
         #expect(
-            Moat.vmName(workspace: workspace) == "moat.my-caf-_app.\(hash)"
+            GuestVM.vmName(workspace: workspace) == "moat.my-caf-_app.\(hash)"
         )
     }
 
     @Test
     func spec() async throws {
-        let spec = try await prepare {
+        let spec = try await prepare(claudeArguments: ["--resume", "-c"]) {
             $0.permissionMode = "plan"
             $0.model = "sonnet"
             $0.cpus = 4
             $0.memory = "8G"
-            $0.claudeArguments = ["--resume", "-c"]
         }
         #expect(spec.name == "moat.workspace.\(hash)")
         #expect(spec.image == "moat:latest")
@@ -256,7 +263,7 @@ struct MoatTests {
     @Test
     func doesNotSeedClaudeSettingsWhenDisabled() async throws {
         try fixture.write(#"{"theme": "dark"}"#, path: ".claude/settings.json", base: fixture.home)
-        _ = try await prepare { $0.seedsClaudeSettings = false }
+        _ = try await prepare { $0.noClaudeSettings = true }
         let settings = try fixture.readJSON(claudeSettingsFile)
         #expect(settings == ["autoMemoryDirectory": "~/.claude/memory"])
     }
