@@ -40,8 +40,15 @@ final class SessionsModel {
         }
     }
 
-    /// Starts the session for `workspace`, with the default options.
+    /// Returns the session started for `workspace`, if there is one.
+    func session(workspace: String) -> Session? {
+        sessionManager.session(workspace: workspace)
+    }
+
+    /// Starts the session for `workspace`, with the default options, and
+    /// selects it.
     func start(workspace: String) {
+        selectedWorkspace = workspace
         Task {
             await _start(workspace: workspace)
         }
@@ -61,7 +68,7 @@ final class SessionsModel {
                 workspace: workspace,
                 options: try settingsManager.loadSettings(),
                 claudeArguments: [],
-                // A placeholder until there's a terminal view to size it.
+                // The terminal showing the session resizes it to fit.
                 size: TerminalSize(columns: 80, rows: 24),
             )
         } catch {

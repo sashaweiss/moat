@@ -12,10 +12,9 @@ final class MainWindowController: NSWindowController {
         )
         sidebarItem.minimumThickness = 200
 
-        // Empty for now; this will show the selected session.
-        let contentViewController = NSViewController()
-        contentViewController.view = NSView()
-        let contentItem = NSSplitViewItem(viewController: contentViewController)
+        let contentItem = NSSplitViewItem(
+            viewController: SessionContentViewController(model: model),
+        )
 
         let splitViewController = NSSplitViewController()
         splitViewController.addSplitViewItem(sidebarItem)
