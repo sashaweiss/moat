@@ -13,6 +13,11 @@ public struct SessionMetadata: Codable, Equatable, Sendable {
         self.name = name
     }
 
+    /// The name of the session's VM.
+    var vmName: String {
+        GuestVM.vmName(workspace: URL(fileURLWithPath: workspace))
+    }
+
     /// Loads metadata from `url`.
     public static func load(file url: URL) throws -> SessionMetadata {
         let data = try Data(contentsOf: url)

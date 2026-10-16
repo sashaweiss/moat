@@ -11,6 +11,9 @@ final class SessionsModel {
     /// The workspace of the session selected in the sidebar.
     var selectedWorkspace: String?
 
+    /// Each session's status, by workspace, as of `updateStatuses()`.
+    private(set) var statuses: [String: SessionStatus] = [:]
+
     @ObservationIgnored
     private let settingsManager: SettingsManager
     @ObservationIgnored
@@ -38,6 +41,48 @@ final class SessionsModel {
         } catch {
             Logger.error("Couldn't list sessions: \(error)")
         }
+    }
+
+    /// Returns the status of the session for `workspace`.
+    func status(workspace: String) -> SessionStatus {
+        statuses[workspace] ?? .stopped
+    }
+
+    /// Keeps `statuses` up to date until cancelled: updates them every
+    /// second, and refreshes which VMs are running every 5 seconds.
+    func updateStatuses() async {
+        var seconds = 5
+        while !Task.isCancelled {
+            if seconds == 5 {
+                seconds = 0
+                await refreshRunningVMs()
+            } else {
+                recomputeStatuses()
+            }
+            seconds += 1
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    /// Refreshes which VMs are running (e.g., started by MoatCLI), and the
+    /// statuses that depend on it.
+    func refreshRunningVMs() async {
+        do {
+            try await sessionManager.refreshRunningVMs()
+        } catch {
+            Logger.warn("Couldn't list running VMs: \(error)")
+        }
+        recomputeStatuses()
+    }
+
+    private func recomputeStatuses() {
+        var statuses: [String: SessionStatus] = [:]
+        for session in sessions {
+            statuses[session.workspace] = sessionManager.status(
+                session: session,
+            )
+        }
+        self.statuses = statuses
     }
 
     /// Returns the session started for `workspace`, if there is one.

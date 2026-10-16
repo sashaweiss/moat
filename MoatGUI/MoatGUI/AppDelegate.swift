@@ -42,12 +42,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         sessionsModel.migratePointers()
         sessionsModel.reloadSessions()
+        Task {
+            await sessionsModel.updateStatuses()
+        }
 
         let mainWindowController = MainWindowController(model: sessionsModel)
         mainWindowController.showWindow(nil)
         self.mainWindowController = mainWindowController
 
         NSApplication.shared.activate()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task {
+            await sessionsModel.refreshRunningVMs()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(

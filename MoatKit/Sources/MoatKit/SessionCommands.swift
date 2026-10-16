@@ -11,16 +11,20 @@ public struct SessionCommands: Sendable {
     public var start: @Sendable (VMLaunchSpec) -> [String]
     /// Returns the command that stops a VM, causing `start` to exit.
     public var stop: @Sendable (VMLaunchSpec) -> [String]
+    /// Prints the names of the running VMs, one per line.
+    public var listRunning: [String]
 
     public init(
         checkSystem: [String],
         startSystem: [String],
         start: @escaping @Sendable (VMLaunchSpec) -> [String],
         stop: @escaping @Sendable (VMLaunchSpec) -> [String],
+        listRunning: [String],
     ) {
         self.checkSystem = checkSystem
         self.startSystem = startSystem
         self.start = start
         self.stop = stop
+        self.listRunning = listRunning
     }
 }

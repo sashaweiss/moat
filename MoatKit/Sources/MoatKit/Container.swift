@@ -10,6 +10,7 @@ public enum Container {
             startSystem: [executable, "system", "start"],
             start: { spec in startCommand(spec: spec, executable: executable) },
             stop: { spec in stopCommand(spec: spec, executable: executable) },
+            listRunning: [executable, "list", "--quiet"],
         )
     }
 

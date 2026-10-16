@@ -2,6 +2,7 @@ import CMoatKit
 import Foundation
 import Observation
 import Subprocess
+import Synchronization
 #if canImport(Darwin)
 import Darwin
 import System
@@ -63,6 +64,15 @@ public final class Session {
 
     /// A file descriptor for our end of the pseudo-terminal.
     private nonisolated let terminal: FileDescriptor
+
+    /// When the VM last wrote to the terminal, if it has. Set by the thread
+    /// reading the terminal.
+    private nonisolated let lastOutputDateMutex = Mutex<Date?>(nil)
+
+    /// When the VM last wrote to the terminal, if it has.
+    public nonisolated var lastOutputDate: Date? {
+        lastOutputDateMutex.withLock { $0 }
+    }
 
     /// Serializes writes to the terminal.
     private nonisolated let writeQueue = DispatchQueue(label: "moat.Session.write")
@@ -321,6 +331,7 @@ public final class Session {
                 guard count > 0 else {
                     break
                 }
+                lastOutputDateMutex.withLock { $0 = Date() }
                 outputContinuation.yield(buffer[..<count])
             }
             outputContinuation.finish()

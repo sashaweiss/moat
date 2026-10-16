@@ -1,5 +1,26 @@
 import Foundation
 import Observation
+import Subprocess
+#if canImport(System)
+import System
+#else
+import SystemPackage
+#endif
+
+/// A session's status, as shown to the user.
+public enum SessionStatus: Equatable, Sendable {
+    /// Not running.
+    case stopped
+    /// Running here, and the VM hasn't written to its terminal lately.
+    case idle
+    /// Running here, and the VM has written to its terminal lately (e.g.,
+    /// Claude is working).
+    case busy
+    /// Running, but not started here (e.g., by MoatCLI).
+    case runningElsewhere
+    /// The session's workspace no longer exists.
+    case missing
+}
 
 /// Manages moat's sessions, persisted in `~/.moat/sessions`.
 @MainActor
@@ -14,6 +35,13 @@ public final class SessionManager {
     /// The sessions started by this manager, keyed by their VMs' names. A
     /// session stays here after it exits, until it's started again.
     public private(set) var sessions: [String: Session] = [:]
+
+    /// The names of the running VMs, as of `refreshRunningVMs()`.
+    private var runningVMNames: Set<String> = []
+
+    /// How recently a session's VM must have written to its terminal for the
+    /// session to be busy.
+    private static let busyInterval: TimeInterval = 3
 
     public init(environment: HostEnvironment, commands: SessionCommands) {
         self.environment = environment
@@ -92,6 +120,11 @@ public final class SessionManager {
             }
         }
 
+        try await refreshRunningVMs()
+        guard !runningVMNames.contains(spec.name) else {
+            throw MoatError.sessionRunningElsewhere(workspace)
+        }
+
         let session = try Session.start(
             spec: spec,
             checkSystemCommand: commands.checkSystem,
@@ -150,5 +183,75 @@ public final class SessionManager {
         if let error = errors.first {
             throw error
         }
+    }
+
+    /// Returns the status of `session` at `date`. Whether a session started
+    /// elsewhere is running is as of `refreshRunningVMs()`.
+    public func status(
+        session metadata: SessionMetadata,
+        date: Date = Date(),
+    ) -> SessionStatus {
+        guard
+            Filesystem.isDirectory(URL(
+                fileURLWithPath: metadata.workspace,
+            ))
+        else {
+            return .missing
+        }
+
+        if let session = sessions[metadata.vmName] {
+            switch session.state {
+            case .running, .stopping:
+                if
+                    let lastOutputDate = session.lastOutputDate,
+                    date.timeIntervalSince(lastOutputDate) < Self.busyInterval
+                {
+                    return .busy
+                }
+
+                return .idle
+            case .exited, .signaled, .failed:
+                break
+            }
+        }
+
+        if runningVMNames.contains(metadata.vmName) {
+            return .runningElsewhere
+        }
+
+        return .stopped
+    }
+
+    /// Re-lists the running VMs, for `status(session:date:)`. If the tool's
+    /// system isn't running, no VMs are.
+    public func refreshRunningVMs() async throws {
+        let check = try await Subprocess.run(
+            .path(FilePath(commands.checkSystem[0])),
+            arguments: Arguments(Array(commands.checkSystem.dropFirst())),
+            output: .discarded,
+        )
+        guard check.terminationStatus.isSuccess else {
+            runningVMNames = []
+            return
+        }
+
+        let result = try await Subprocess.run(
+            .path(FilePath(commands.listRunning[0])),
+            arguments: Arguments(Array(commands.listRunning.dropFirst())),
+            output: .string(limit: 1 << 20),
+        )
+        guard result.terminationStatus.isSuccess else {
+            throw MoatError.commandFailed(
+                commands.listRunning,
+                status: result.terminationStatus,
+            )
+        }
+
+        runningVMNames = Set(
+            result.standardOutput
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty },
+        )
     }
 }

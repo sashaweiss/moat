@@ -11,12 +11,14 @@ struct SessionManagerTests {
     }
 
     /// A manager whose sessions run `start` and `stop` as their VM commands,
-    /// with `checkSystem` and `startSystem` for the system.
+    /// with `checkSystem` and `startSystem` for the system, and
+    /// `listRunning` to list running VMs (by default, none).
     func sessionManager(
         checkSystem: [String] = ["/usr/bin/true"],
         startSystem: [String] = ["/usr/bin/false"],
         start: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/true"] },
         stop: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/false"] },
+        listRunning: [String] = ["/usr/bin/true"],
     ) -> SessionManager {
         SessionManager(
             environment: fixture.environment,
@@ -25,8 +27,14 @@ struct SessionManagerTests {
                 startSystem: startSystem,
                 start: start,
                 stop: stop,
+                listRunning: listRunning,
             ),
         )
+    }
+
+    /// The metadata for the fixture's workspace.
+    var metadata: SessionMetadata {
+        SessionMetadata(workspace: workspace, name: "workspace")
     }
 
     /// Starts `sessionManager`'s session for the fixture's workspace.
@@ -307,5 +315,88 @@ struct SessionManagerTests {
 
         session.write(ArraySlice("\r".utf8))
         await session.waitForExit()
+    }
+
+    @Test
+    func statusIsStoppedWhenNothingRuns() async throws {
+        let sessionManager = sessionManager()
+        try await sessionManager.refreshRunningVMs()
+        #expect(sessionManager.status(session: metadata) == .stopped)
+    }
+
+    @Test
+    func statusIsMissingWithoutWorkspace() {
+        let missing = SessionMetadata(workspace: "/nonexistent", name: "gone")
+        #expect(sessionManager().status(session: missing) == .missing)
+    }
+
+    @Test
+    func statusIsRunningElsewhereWhenItsVMIsListed() async throws {
+        let sessionManager = sessionManager(
+            listRunning: ["/bin/echo", "other-vm\n\(metadata.vmName)"],
+        )
+        try await sessionManager.refreshRunningVMs()
+        #expect(sessionManager.status(session: metadata) == .runningElsewhere)
+    }
+
+    @Test
+    func nothingRunsWhenSystemIsStopped() async throws {
+        // Listing would fail, but isn't attempted.
+        let sessionManager = sessionManager(
+            checkSystem: ["/usr/bin/false"],
+            listRunning: ["/usr/bin/false"],
+        )
+        try await sessionManager.refreshRunningVMs()
+        #expect(sessionManager.status(session: metadata) == .stopped)
+    }
+
+    @Test
+    func refreshFailsIfListingFails() async throws {
+        let sessionManager = sessionManager(listRunning: ["/usr/bin/false"])
+        await #expect(throws: MoatError.self) {
+            try await sessionManager.refreshRunningVMs()
+        }
+    }
+
+    @Test
+    func startStartsSystemBeforeListing() async throws {
+        // While the system is stopped, listing would fail.
+        let marker = fixture.root.appendingPathComponent("system-started")
+        let sessionManager = sessionManager(
+            checkSystem: ["/bin/test", "-e", marker.path],
+            startSystem: ["/usr/bin/touch", marker.path],
+            listRunning: ["/usr/bin/false"],
+        )
+        let session = try await start(sessionManager)
+        await session.waitForExit()
+        #expect(session.state == .exited(code: 0))
+    }
+
+    @Test
+    func statusIsBusyThenIdle() async throws {
+        let sessionManager = sessionManager(start: { _ in
+            ["/bin/sh", "-c", "echo ready; read line"]
+        })
+        let session = try await start(sessionManager)
+        try await waitForOutput("ready", session: session)
+
+        #expect(sessionManager.status(session: metadata) == .busy)
+        let later = Date().addingTimeInterval(4)
+        #expect(sessionManager.status(session: metadata, date: later) == .idle)
+
+        session.write(ArraySlice("\r".utf8))
+        await session.waitForExit()
+        #expect(sessionManager.status(session: metadata) == .stopped)
+    }
+
+    @Test
+    func startFailsIfRunningElsewhere() async throws {
+        let sessionManager = sessionManager(
+            listRunning: ["/bin/echo", metadata.vmName],
+        )
+        await #expect(throws: MoatError.sessionRunningElsewhere(workspace)) {
+            try await start(sessionManager)
+        }
+        #expect(sessionManager.session(workspace: workspace) == nil)
     }
 }

@@ -1,7 +1,7 @@
 import MoatKit
 import SwiftUI
 
-/// The sidebar: the sessions in `model`, each with its workspace.
+/// The sidebar: the sessions in `model`, each with its workspace and status.
 struct SidebarView: View {
     @Bindable var model: SessionsModel
 
@@ -11,32 +11,97 @@ struct SidebarView: View {
             id: \.workspace,
             selection: $model.selectedWorkspace,
         ) { session in
-            SessionRow(session: session)
+            let status = model.status(workspace: session.workspace)
+            SessionRow(session: session, status: status)
                 .contextMenu {
                     Button("Start") {
                         model.start(workspace: session.workspace)
                     }
+                    .disabled(!canStart(status: status))
                     Button("Stop") {
                         model.stop(workspace: session.workspace)
                     }
+                    .disabled(!canStop(status: status))
                 }
         }
         .listStyle(.sidebar)
     }
+
+    private func canStart(status: SessionStatus) -> Bool {
+        switch status {
+        case .stopped:
+            true
+        case .idle, .busy, .runningElsewhere, .missing:
+            false
+        }
+    }
+
+    private func canStop(status: SessionStatus) -> Bool {
+        switch status {
+        case .idle, .busy:
+            true
+        case .stopped, .runningElsewhere, .missing:
+            false
+        }
+    }
 }
 
-/// A session's name, with its workspace beneath.
+/// A session's status badge and name, with its workspace beneath. Sessions
+/// that can't be used here are dimmed, and say why.
 private struct SessionRow: View {
     let session: SessionMetadata
+    let status: SessionStatus
 
     var body: some View {
-        VStack(alignment: .leading) {
-            Text(session.name)
-            Text(session.workspace)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+        HStack {
+            Circle()
+                .fill(badgeColor)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading) {
+                Text(session.name)
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .opacity(isDimmed ? 0.5 : 1)
+    }
+
+    private var badgeColor: Color {
+        switch status {
+        case .stopped:
+            .gray
+        case .missing:
+            .black
+        case .idle:
+            .green
+        case .busy:
+            .orange
+        case .runningElsewhere:
+            .blue
+        }
+    }
+
+    /// The workspace, and why the session can't be used here, if it can't.
+    private var caption: String {
+        switch status {
+        case .stopped, .idle, .busy:
+            session.workspace
+        case .runningElsewhere:
+            "Running elsewhere: \(session.workspace)"
+        case .missing:
+            "Missing: \(session.workspace)"
+        }
+    }
+
+    private var isDimmed: Bool {
+        switch status {
+        case .stopped, .idle, .busy:
+            false
+        case .runningElsewhere, .missing:
+            true
         }
     }
 }
