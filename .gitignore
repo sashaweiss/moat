@@ -1,8 +1,11 @@
-__pycache__
 .DS_Store
+
 DerivedData/
 .build/
 .swiftpm/
 xcuserdata/
+
 /release/
+screenshots/
+
 release-identity.json
