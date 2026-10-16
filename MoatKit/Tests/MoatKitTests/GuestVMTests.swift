@@ -132,6 +132,26 @@ struct GuestVMTests {
     }
 
     @Test
+    func hostSkillsAreSortedAndUnresolved() throws {
+        let hostSkills = try fixture.makeDirectory(".claude/skills", base: fixture.home)
+        try fixture.makeDirectory("zeta", base: hostSkills)
+        try fixture.makeDirectory(".hidden", base: hostSkills)
+        try fixture.write("", path: "not-a-skill.md", base: hostSkills)
+        let linkedSkill = try fixture.makeDirectory("elsewhere/linked")
+        let link = hostSkills.appendingPathComponent("linked")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: linkedSkill)
+
+        let skills = try fixture.guestVM().hostSkills()
+        #expect(skills.map(\.lastPathComponent) == ["linked", "zeta"])
+        #expect(skills[0].path == link.path)
+    }
+
+    @Test
+    func noHostSkillsDirectory() throws {
+        #expect(try fixture.guestVM().hostSkills().isEmpty)
+    }
+
+    @Test
     func addSkills() async throws {
         try fixture.makeDirectory(".claude/skills/host", base: fixture.home)
         let extra = try fixture.makeDirectory("extra")

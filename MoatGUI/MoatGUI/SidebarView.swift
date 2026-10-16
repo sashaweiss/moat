@@ -4,9 +4,10 @@ import SwiftUI
 /// The sidebar: the sessions in `model`, each with its workspace and status.
 struct SidebarView: View {
     @Bindable var model: SessionsModel
-
-    /// The session the user asked to remove, while confirming it.
-    @State private var sessionToRemove: SessionMetadata?
+    /// Asks for options to start the session for a workspace, and starts it.
+    let startSession: (Workspace) -> Void
+    /// Confirms removing a session, and removes it.
+    let removeSession: (SessionMetadata) -> Void
 
     var body: some View {
         List(
@@ -17,8 +18,8 @@ struct SidebarView: View {
             let status = model.status(workspace: session.workspace)
             SessionRow(session: session, status: status)
                 .contextMenu {
-                    Button("Start") {
-                        model.start(workspace: session.workspace)
+                    Button("Start…") {
+                        startSession(session.workspace)
                     }
                     .disabled(!canStart(status: status))
                     Button("Stop") {
@@ -27,35 +28,12 @@ struct SidebarView: View {
                     .disabled(!canStop(status: status))
                     Divider()
                     Button("Remove…") {
-                        sessionToRemove = session
+                        removeSession(session)
                     }
                     .disabled(!canRemove(status: status))
                 }
         }
         .listStyle(.sidebar)
-        .confirmationDialog(
-            "Remove session \"\(sessionToRemove?.name ?? "nil")\"?",
-            isPresented: Binding(
-                get: { sessionToRemove != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        sessionToRemove = nil
-                    }
-                },
-            ),
-            presenting: sessionToRemove,
-        ) { session in
-            Button("Remove", role: .destructive) {
-                model.remove(session: session)
-            }
-        } message: { session in
-            Text(
-                """
-                This permanently deletes Claude history and settings for \
-                "\(session.workspace.path)".
-                """,
-            )
-        }
     }
 
     private func canStart(status: SessionStatus) -> Bool {

@@ -40,18 +40,8 @@ public struct GuestVM: Sendable {
 
         // Mount skills individually, keyed by name, so symlinked skills work.
         var skills: [(name: String, directory: URL)] = []
-        let hostSkillsDirectory = environment.claudeDirectory.appendingPathComponent("skills")
-        if Filesystem.isDirectory(hostSkillsDirectory) {
-            let contents = try fileManager.contentsOfDirectory(
-                at: hostSkillsDirectory,
-                includingPropertiesForKeys: nil,
-            )
-            for skill in contents {
-                guard Filesystem.isDirectory(skill), !skill.lastPathComponent.hasPrefix(".") else {
-                    continue
-                }
-                skills.append((skill.lastPathComponent, Filesystem.resolveSymlinks(skill)))
-            }
+        for skill in try hostSkills() {
+            skills.append((skill.lastPathComponent, Filesystem.resolveSymlinks(skill)))
         }
         for skillOption in options.addSkills {
             let url = URL(fileURLWithPath: NSString(string: skillOption).expandingTildeInPath)
@@ -268,6 +258,29 @@ public struct GuestVM: Sendable {
                 options.model,
             ] + claudeArguments,
         )
+    }
+
+    /// Returns the skills in the host's `~/.claude/skills`, which every
+    /// session gets: its directories (or symlinks to them), sorted by name,
+    /// skipping hidden ones. Paths are as listed, with symlinks unresolved.
+    public func hostSkills() throws -> [URL] {
+        let hostSkillsDirectory = environment.claudeDirectory
+            .appendingPathComponent("skills")
+        guard Filesystem.isDirectory(hostSkillsDirectory) else {
+            return []
+        }
+        return try FileManager.default
+            .contentsOfDirectory(
+                at: hostSkillsDirectory,
+                includingPropertiesForKeys: nil,
+            )
+            .filter { skill in
+                Filesystem.isDirectory(skill)
+                    && !skill.lastPathComponent.hasPrefix(".")
+            }
+            .sorted { first, second in
+                first.lastPathComponent < second.lastPathComponent
+            }
     }
 
     /// Migrates a `<hash>.pointer` file, which holds a session's workspace

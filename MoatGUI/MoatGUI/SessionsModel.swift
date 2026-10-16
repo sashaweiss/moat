@@ -90,26 +90,48 @@ final class SessionsModel {
         sessionManager.session(workspace: workspace)
     }
 
-    /// Adds a session for `folder`, as `start(workspace:)` does.
-    func add(folder: URL) {
-        start(workspace: Workspace(folder: folder))
+    /// The options each start begins with, from `settings.json`.
+    var defaultOptions: SessionOptions {
+        settingsManager.sessionOptions
     }
 
-    /// Selects the session for `workspace`, and starts it with the default
-    /// options, unless it's already running.
-    func start(workspace: Workspace) {
-        selectedWorkspace = workspace
-        Task {
-            await _start(workspace: workspace)
+    /// Returns the paths of the skills in the host's `~/.claude/skills`,
+    /// which every session gets.
+    func hostSkills() -> [String] {
+        do {
+            return try GuestVM(environment: settingsManager.environment)
+                .hostSkills()
+                .map(\.path)
+        } catch {
+            Logger.warn("Couldn't list the host's skills: \(error)")
+            return []
         }
     }
 
-    private func _start(workspace: Workspace) async {
+    /// Returns the name of the session for `workspace`, or the name a new one
+    /// would get.
+    func sessionName(workspace: Workspace) -> String {
+        sessions.first { $0.workspace == workspace }?.name ?? workspace.name
+    }
+
+    /// Selects the session for `workspace`, and starts it with `options`,
+    /// unless it's already running.
+    func start(workspace: Workspace, options: SessionOptions) {
+        selectedWorkspace = workspace
+        Task {
+            await _start(workspace: workspace, options: options)
+        }
+    }
+
+    private func _start(
+        workspace: Workspace,
+        options: SessionOptions,
+    ) async {
         let session: Session
         do {
             session = try await sessionManager.start(
                 workspace: workspace,
-                options: settingsManager.sessionOptions,
+                options: options,
                 claudeArguments: [],
                 // The terminal showing the session resizes it to fit.
                 size: TerminalSize(columns: 80, rows: 24),
