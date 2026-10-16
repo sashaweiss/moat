@@ -95,8 +95,8 @@ public final class SessionManager {
     }
 
     /// Starts a session for `workspace` with `options` on a terminal of
-    /// `size`, running `claude` with `claudeArguments` added. Fails if this
-    /// manager's session for `workspace` is already running.
+    /// `size`, running `claude` with `claudeArguments` added. Fails if the
+    /// session is already running, here or elsewhere.
     public func start(
         workspace: Workspace,
         options: SessionOptions,
@@ -140,6 +140,35 @@ public final class SessionManager {
             return
         }
         try await session.stop(command: commands.stop(session.spec))
+    }
+
+    /// Removes `session` (which must be stopped or missing) from
+    /// `~/.moat/sessions`, deleting everything moat has recorded for it,
+    /// including Claude's history. Doesn't touch its workspace.
+    public func remove(session metadata: SessionMetadata) async throws {
+        try await refreshRunningVMs()
+        switch status(session: metadata) {
+        case .stopped, .missing:
+            break
+        case .idle, .busy, .runningElsewhere:
+            throw MoatError.sessionRunning(metadata.workspace)
+        }
+
+        // A session's files are all named for its workspace's hash.
+        let hash = metadata.workspace.hash
+        let sessionFiles = try FileManager.default
+            .contentsOfDirectory(
+                at: environment.sessionsDirectory,
+                includingPropertiesForKeys: nil,
+            )
+            .filter { file in
+                let name = file.lastPathComponent
+                return name == hash || name.hasPrefix("\(hash).")
+            }
+        for file in sessionFiles {
+            try FileManager.default.removeItem(at: file)
+        }
+        sessions[metadata.workspace.vmName] = nil
     }
 
     /// This manager's sessions that are running (or stopping).

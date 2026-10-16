@@ -90,19 +90,17 @@ final class SessionsModel {
         sessionManager.session(workspace: workspace)
     }
 
-    /// Starts the session for `workspace`, with the default options, and
-    /// selects it.
+    /// Adds a session for `folder`, as `start(workspace:)` does.
+    func add(folder: URL) {
+        start(workspace: Workspace(folder: folder))
+    }
+
+    /// Selects the session for `workspace`, and starts it with the default
+    /// options, unless it's already running.
     func start(workspace: Workspace) {
         selectedWorkspace = workspace
         Task {
             await _start(workspace: workspace)
-        }
-    }
-
-    /// Stops the session for `workspace`, if it's running.
-    func stop(workspace: Workspace) {
-        Task {
-            await _stop(workspace: workspace)
         }
     }
 
@@ -116,11 +114,18 @@ final class SessionsModel {
                 // The terminal showing the session resizes it to fit.
                 size: TerminalSize(columns: 80, rows: 24),
             )
+        } catch MoatError.sessionAlreadyRunning,
+            MoatError.sessionRunningElsewhere
+        {
+            // It's already running, and selected; that's all there is to do.
+            return
         } catch {
             Logger.error("Couldn't start session for \(workspace): \(error)")
             return
         }
         Logger.info("Started session for \(workspace)")
+        // A new session has just been recorded, so list it.
+        reloadSessions()
 
         await session.waitForExit()
         switch session.state {
@@ -139,12 +144,43 @@ final class SessionsModel {
         }
     }
 
+    /// Stops the session for `workspace`, if it's running.
+    func stop(workspace: Workspace) {
+        Task {
+            await _stop(workspace: workspace)
+        }
+    }
+
     private func _stop(workspace: Workspace) async {
         do {
             try await sessionManager.stop(workspace: workspace)
         } catch {
             Logger.error("Couldn't stop session for \(workspace): \(error)")
         }
+    }
+
+    /// Removes the session for `session`, deleting everything moat has for
+    /// it, including Claude's history.
+    func remove(session: SessionMetadata) {
+        Task {
+            await _remove(session: session)
+        }
+    }
+
+    private func _remove(session: SessionMetadata) async {
+        do {
+            try await sessionManager.remove(session: session)
+        } catch {
+            Logger.error(
+                "Couldn't remove session for \(session.workspace): \(error)",
+            )
+            return
+        }
+        Logger.info("Removed session for \(session.workspace)")
+        if selectedWorkspace == session.workspace {
+            selectedWorkspace = nil
+        }
+        reloadSessions()
     }
 
     /// The names of the sessions that are running.

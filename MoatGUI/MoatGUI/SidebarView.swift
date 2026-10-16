@@ -5,6 +5,9 @@ import SwiftUI
 struct SidebarView: View {
     @Bindable var model: SessionsModel
 
+    /// The session the user asked to remove, while confirming it.
+    @State private var sessionToRemove: SessionMetadata?
+
     var body: some View {
         List(
             model.sessions,
@@ -22,9 +25,37 @@ struct SidebarView: View {
                         model.stop(workspace: session.workspace)
                     }
                     .disabled(!canStop(status: status))
+                    Divider()
+                    Button("Remove…") {
+                        sessionToRemove = session
+                    }
+                    .disabled(!canRemove(status: status))
                 }
         }
         .listStyle(.sidebar)
+        .confirmationDialog(
+            "Remove session \"\(sessionToRemove?.name ?? "nil")\"?",
+            isPresented: Binding(
+                get: { sessionToRemove != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        sessionToRemove = nil
+                    }
+                },
+            ),
+            presenting: sessionToRemove,
+        ) { session in
+            Button("Remove", role: .destructive) {
+                model.remove(session: session)
+            }
+        } message: { session in
+            Text(
+                """
+                This permanently deletes Claude history and settings for \
+                "\(session.workspace.path)".
+                """,
+            )
+        }
     }
 
     private func canStart(status: SessionStatus) -> Bool {
@@ -32,6 +63,15 @@ struct SidebarView: View {
         case .stopped:
             true
         case .idle, .busy, .runningElsewhere, .missing:
+            false
+        }
+    }
+
+    private func canRemove(status: SessionStatus) -> Bool {
+        switch status {
+        case .stopped, .missing:
+            true
+        case .idle, .busy, .runningElsewhere:
             false
         }
     }

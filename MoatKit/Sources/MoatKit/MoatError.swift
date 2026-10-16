@@ -9,6 +9,7 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
     case invalidMetadataFile(String)
     case sessionAlreadyRunning(Workspace)
     case sessionRunningElsewhere(Workspace)
+    case sessionRunning(Workspace)
     case commandFailed([String], status: TerminationStatus)
 
     public var description: String {
@@ -23,6 +24,8 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
             "invalid settings file: \(path)"
         case .invalidMetadataFile(let path):
             "invalid session metadata file: \(path)"
+        case .sessionRunning(let workspace):
+            "the session for \(workspace) is running"
         case .sessionRunningElsewhere(let workspace):
             "a session for \(workspace) is already running elsewhere"
         case .sessionAlreadyRunning(let workspace):

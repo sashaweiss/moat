@@ -404,4 +404,57 @@ struct SessionManagerTests {
         }
         #expect(sessionManager.session(workspace: workspace) == nil)
     }
+
+    @Test
+    func removeDeletesOnlyThatSessionsFiles() async throws {
+        let sessionManager = sessionManager()
+        let session = try await start(sessionManager)
+        await session.waitForExit()
+        let other = try writeMetadata(name: "other")
+        let hash = workspace.hash
+        #expect(Filesystem.isDirectory(sessions.appendingPathComponent(hash)))
+
+        try await sessionManager.remove(session: metadata)
+        let remaining = try FileManager.default
+            .contentsOfDirectory(atPath: sessions.path)
+        #expect(!remaining.contains { $0.hasPrefix(hash) })
+        #expect(try sessionManager.list() == [other])
+        #expect(sessionManager.session(workspace: workspace) == nil)
+        #expect(Filesystem.isDirectory(fixture.workspace))
+    }
+
+    @Test
+    func removeMissingSession() async throws {
+        let missing = try writeMetadata(name: "gone")
+        let sessionManager = sessionManager()
+        try await sessionManager.remove(session: missing)
+        #expect(try sessionManager.list().isEmpty)
+    }
+
+    @Test
+    func removeRefusesRunningSession() async throws {
+        let sessionManager = sessionManager(start: { _ in
+            ["/bin/sh", "-c", "echo ready; read line"]
+        })
+        let session = try await start(sessionManager)
+        try await waitForOutput("ready", session: session)
+
+        await #expect(throws: MoatError.sessionRunning(workspace)) {
+            try await sessionManager.remove(session: metadata)
+        }
+        #expect(try sessionManager.list().count == 1)
+
+        session.write(ArraySlice("\r".utf8))
+        await session.waitForExit()
+    }
+
+    @Test
+    func removeRefusesSessionRunningElsewhere() async throws {
+        let sessionManager = sessionManager(
+            listRunning: ["/bin/echo", metadata.workspace.vmName],
+        )
+        await #expect(throws: MoatError.sessionRunning(workspace)) {
+            try await sessionManager.remove(session: metadata)
+        }
+    }
 }
