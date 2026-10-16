@@ -6,14 +6,14 @@ import SwiftTerm
 /// input. Contents are preserved after a session stops, and input is ignored
 /// until another session starts.
 final class TerminalViewController: NSViewController, TerminalViewDelegate {
-    private let workspace: String
+    private let workspace: Workspace
     private let model: SessionsModel
     private let terminalView = TerminalView(frame: .zero)
 
     /// The session being shown, if one has started.
     private var session: Session?
 
-    init(workspace: String, model: SessionsModel) {
+    init(workspace: Workspace, model: SessionsModel) {
         self.workspace = workspace
         self.model = model
         super.init(nibName: nil, bundle: nil)

@@ -89,19 +89,16 @@ public final class SessionManager {
         }
     }
 
-    /// Returns this manager's session for `workspace` (a path, as in
-    /// `SessionMetadata`), if it has started one.
-    public func session(workspace: String) -> Session? {
-        sessions.values.first { session in
-            session.spec.workingDirectory == workspace
-        }
+    /// Returns this manager's session for `workspace`, if it has started one.
+    public func session(workspace: Workspace) -> Session? {
+        sessions[workspace.vmName]
     }
 
     /// Starts a session for `workspace` with `options` on a terminal of
     /// `size`, running `claude` with `claudeArguments` added. Fails if this
     /// manager's session for `workspace` is already running.
     public func start(
-        workspace: String,
+        workspace: Workspace,
         options: SessionOptions,
         claudeArguments: [String],
         size: TerminalSize,
@@ -138,7 +135,7 @@ public final class SessionManager {
 
     /// Stops the running session for `workspace`, and waits for it to exit.
     /// Does nothing if there isn't one.
-    public func stop(workspace: String) async throws {
+    public func stop(workspace: Workspace) async throws {
         guard let session = session(workspace: workspace) else {
             return
         }
@@ -191,15 +188,11 @@ public final class SessionManager {
         session metadata: SessionMetadata,
         date: Date = Date(),
     ) -> SessionStatus {
-        guard
-            Filesystem.isDirectory(URL(
-                fileURLWithPath: metadata.workspace,
-            ))
-        else {
+        guard Filesystem.isDirectory(metadata.workspace.url) else {
             return .missing
         }
 
-        if let session = sessions[metadata.vmName] {
+        if let session = session(workspace: metadata.workspace) {
             switch session.state {
             case .running, .stopping:
                 if
@@ -215,7 +208,7 @@ public final class SessionManager {
             }
         }
 
-        if runningVMNames.contains(metadata.vmName) {
+        if runningVMNames.contains(metadata.workspace.vmName) {
             return .runningElsewhere
         }
 

@@ -3,19 +3,14 @@ import Foundation
 /// What moat records about a session, in `~/.moat/sessions/<hash>.metadata.json`.
 /// Not mounted into the VM.
 public struct SessionMetadata: Codable, Equatable, Sendable {
-    /// The workspace's absolute path, with symlinks resolved.
-    public var workspace: String
+    /// The session's workspace, which it's keyed by.
+    public var workspace: Workspace
     /// A name to show for the session; defaults to the workspace's name.
     public var name: String
 
-    public init(workspace: String, name: String) {
+    public init(workspace: Workspace, name: String) {
         self.workspace = workspace
         self.name = name
-    }
-
-    /// The name of the session's VM.
-    var vmName: String {
-        GuestVM.vmName(workspace: URL(fileURLWithPath: workspace))
     }
 
     /// Loads metadata from `url`.

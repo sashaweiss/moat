@@ -1,10 +1,11 @@
 import AppKit
+import MoatKit
 
 /// Shows the selected session's terminal. Each workspace's terminal is kept
 /// while another is selected, so it keeps its contents.
 final class SessionContentViewController: NSViewController {
     private let model: SessionsModel
-    private var terminalViewControllers: [String: TerminalViewController] = [:]
+    private var terminalViewControllers: [Workspace: TerminalViewController] = [:]
 
     init(model: SessionsModel) {
         self.model = model
@@ -38,7 +39,7 @@ final class SessionContentViewController: NSViewController {
         }
     }
 
-    private func show(workspace: String?) {
+    private func show(workspace: Workspace?) {
         for child in children {
             child.view.removeFromSuperview()
             child.removeFromParent()

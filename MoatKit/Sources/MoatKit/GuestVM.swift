@@ -1,4 +1,3 @@
-import Crypto
 import Foundation
 
 /// Prepares a description of the VM a moat session will run in.
@@ -17,18 +16,15 @@ public struct GuestVM: Sendable {
     /// disk for them, returning a spec to launch the session. The session runs
     /// `claude` with `claudeArguments` added.
     public func prepare(
-        workspace workspacePath: String,
+        workspace: Workspace,
         options: SessionOptions,
         claudeArguments: [String],
     ) async throws -> VMLaunchSpec {
         let fileManager = FileManager.default
 
-        guard Filesystem.isDirectory(URL(fileURLWithPath: workspacePath)) else {
-            throw MoatError.notADirectory(workspacePath)
+        guard Filesystem.isDirectory(workspace.url) else {
+            throw MoatError.notADirectory(workspace.path)
         }
-        let workspace = Filesystem.resolveSymlinks(
-            URL(fileURLWithPath: workspacePath),
-        )
 
         var envFile: URL?
         if let envFileOption = options.envFile {
@@ -80,7 +76,7 @@ public struct GuestVM: Sendable {
         // durably on the host, under ~/.moat/sessions. We'll mount this into
         // the VM, so Claude has context from and can resume previous sessions
         // in this workspace.
-        let workspaceHash = Self.hash(workspace: workspace)
+        let workspaceHash = workspace.hash
         let stateDirectory = sessionsDirectory.appendingPathComponent(workspaceHash)
         try fileManager.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
 
@@ -99,13 +95,15 @@ public struct GuestVM: Sendable {
         // (e.g., independent clones), since they'd otherwise be writable via
         // the workspace mount.
         var gitDirectories: [URL] = []
-        if let commonDirectory = try await Git.commonDirectory(
-            workspace: workspace,
-            gitPath: options.gitPath,
-        ) {
+        if
+            let commonDirectory = try await Git.commonDirectory(
+                workspace: workspace.url,
+                gitPath: options.gitPath,
+            )
+        {
             gitDirectories.append(commonDirectory)
         }
-        for nested in try Git.directories(root: workspace) {
+        for nested in try Git.directories(root: workspace.url) {
             if !gitDirectories.contains(where: { $0.path == nested.path }) {
                 gitDirectories.append(nested)
             }
@@ -178,8 +176,8 @@ public struct GuestVM: Sendable {
         )
         let existingMetadata = try? SessionMetadata.load(file: metadataFile)
         let metadata = SessionMetadata(
-            workspace: workspace.path,
-            name: existingMetadata?.name ?? workspace.lastPathComponent,
+            workspace: workspace,
+            name: existingMetadata?.name ?? workspace.name,
         )
         try metadata.write(file: metadataFile)
 
@@ -222,7 +220,11 @@ public struct GuestVM: Sendable {
         // we'll allow git dir write access.
         //
         // Mounts nested inside other mounts must come after their parent.
-        mounts.append(Mount(source: workspace, destination: workspace.path, access: .readWrite))
+        mounts.append(Mount(
+            source: workspace.url,
+            destination: workspace.path,
+            access: .readWrite,
+        ))
         let gitAccess: Mount.Access = switch options.gitAccessMode {
         case .read: .readOnly
         case .write: .readWrite
@@ -236,7 +238,7 @@ public struct GuestVM: Sendable {
         }
 
         return VMLaunchSpec(
-            name: Self.vmName(workspace: workspace),
+            name: workspace.vmName,
             image: Self.image,
             cpus: options.cpus,
             memory: options.memory,
@@ -254,48 +256,24 @@ public struct GuestVM: Sendable {
         )
     }
 
-    /// The name of a workspace's VM: its folder name, to be recognizable, and
-    /// its hash, to be unique. Characters other than ASCII alphanumerics, "\_",
-    /// and "-" are replaced with "-".
-    static func vmName(workspace: URL) -> String {
-        let folderName = String(workspace.lastPathComponent.map { character in
-            if !character.isASCII {
-                return "-"
-            }
-            if character.isLetter || character.isNumber || "_-".contains(character) {
-                return character
-            }
-            return "-"
-        })
-        return "moat.\(folderName).\(hash(workspace: workspace))"
-    }
-
     /// Migrates a `<hash>.pointer` file, which holds a session's workspace
     /// path as plain text, to `<hash>.metadata.json`. If that metadata doesn't
     /// exist yet, it's seeded from the workspace path.
     /// Either way, the `.pointer` file is removed.
     func migratePointer(file pointerFile: URL) throws {
-        let workspace = try String(contentsOf: pointerFile, encoding: .utf8)
+        let path = try String(contentsOf: pointerFile, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let workspace = Workspace(folder: URL(fileURLWithPath: path))
         let hash = pointerFile.deletingPathExtension().lastPathComponent
         let metadataFile = environment.metadataFile(workspaceHash: hash)
         if !Filesystem.isFile(metadataFile) {
             let metadata = SessionMetadata(
                 workspace: workspace,
-                name: URL(fileURLWithPath: workspace).lastPathComponent,
+                name: workspace.name,
             )
             try metadata.write(file: metadataFile)
         }
         try FileManager.default.removeItem(at: pointerFile)
-    }
-
-    /// The key for a workspace's state under `~/.moat/sessions`.
-    static func hash(workspace: URL) -> String {
-        SHA256.hash(data: Data(workspace.path.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-            .prefix(16)
-            .description
     }
 
     static func writeJSON(_ object: [String: Any], to url: URL) throws {

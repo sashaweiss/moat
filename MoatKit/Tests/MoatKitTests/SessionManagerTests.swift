@@ -51,8 +51,8 @@ struct SessionManagerTests {
         )
     }
 
-    var workspace: String {
-        fixture.workspace.path
+    var workspace: Workspace {
+        Workspace(folder: fixture.workspace)
     }
 
     /// Reads `session`'s output until it contains `text`.
@@ -74,8 +74,11 @@ struct SessionManagerTests {
     @discardableResult
     func writeMetadata(name: String) throws -> SessionMetadata {
         try fixture.makeDirectory(".moat/sessions", base: fixture.home)
-        let metadata = SessionMetadata(workspace: "/\(name)", name: name)
-        let hash = GuestVM.hash(workspace: URL(fileURLWithPath: "/\(name)"))
+        let metadata = SessionMetadata(
+            workspace: Workspace(folder: URL(fileURLWithPath: "/\(name)")),
+            name: name,
+        )
+        let hash = metadata.workspace.hash
         try metadata.write(
             file: fixture.environment.metadataFile(workspaceHash: hash),
         )
@@ -108,11 +111,10 @@ struct SessionManagerTests {
 
     @Test
     func migratePointers() throws {
-        let workspace = "/projects/old"
-        let hash = GuestVM.hash(workspace: URL(fileURLWithPath: workspace))
+        let workspace = Workspace(folder: URL(fileURLWithPath: "/projects/old"))
         let pointerFile = try fixture.write(
-            workspace,
-            path: "\(hash).pointer",
+            workspace.path,
+            path: "\(workspace.hash).pointer",
             base: sessions,
         )
         let sessionManager = sessionManager()
@@ -279,7 +281,7 @@ struct SessionManagerTests {
         let other = try fixture.makeDirectory("other")
         let first = try await start(sessionManager)
         let second = try await sessionManager.start(
-            workspace: other.path,
+            workspace: Workspace(folder: other),
             options: SessionOptions(),
             claudeArguments: [],
             size: TerminalSize(columns: 80, rows: 24),
@@ -326,14 +328,17 @@ struct SessionManagerTests {
 
     @Test
     func statusIsMissingWithoutWorkspace() {
-        let missing = SessionMetadata(workspace: "/nonexistent", name: "gone")
+        let missing = SessionMetadata(
+            workspace: Workspace(folder: URL(fileURLWithPath: "/nonexistent")),
+            name: "gone",
+        )
         #expect(sessionManager().status(session: missing) == .missing)
     }
 
     @Test
     func statusIsRunningElsewhereWhenItsVMIsListed() async throws {
         let sessionManager = sessionManager(
-            listRunning: ["/bin/echo", "other-vm\n\(metadata.vmName)"],
+            listRunning: ["/bin/echo", "other-vm\n\(metadata.workspace.vmName)"],
         )
         try await sessionManager.refreshRunningVMs()
         #expect(sessionManager.status(session: metadata) == .runningElsewhere)
@@ -392,7 +397,7 @@ struct SessionManagerTests {
     @Test
     func startFailsIfRunningElsewhere() async throws {
         let sessionManager = sessionManager(
-            listRunning: ["/bin/echo", metadata.vmName],
+            listRunning: ["/bin/echo", metadata.workspace.vmName],
         )
         await #expect(throws: MoatError.sessionRunningElsewhere(workspace)) {
             try await start(sessionManager)

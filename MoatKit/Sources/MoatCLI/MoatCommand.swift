@@ -10,6 +10,12 @@ import SystemPackage
 
 extension GitAccessMode: ExpressibleByArgument {}
 
+extension Workspace: ExpressibleByArgument {
+    public init?(argument: String) {
+        self.init(folder: URL(fileURLWithPath: argument))
+    }
+}
+
 @main
 struct MoatCommand: AsyncParsableCommand {
     static var configuration: CommandConfiguration {
@@ -25,7 +31,7 @@ struct MoatCommand: AsyncParsableCommand {
     }
 
     @Argument(help: "directory to mount as the workspace in the container")
-    var workspace: String
+    var workspace: Workspace
 
     @Option(help: "Claude Code permission mode (default: auto)")
     var permissionMode: String?
@@ -74,10 +80,7 @@ struct MoatCommand: AsyncParsableCommand {
             ),
         )
 
-        let workspaceName = URL(fileURLWithPath: workspace)
-            .standardizedFileURL
-            .lastPathComponent
-        print("moat: run claude in \"\(workspaceName)\" with permission mode \"\(options.permissionMode)\"?")
+        print("moat: run claude in \"\(workspace.name)\" with permission mode \"\(options.permissionMode)\"?")
         if options.gitAccessMode == .write {
             print("WARNING: claude will have write access to git!")
         }
@@ -116,7 +119,7 @@ struct MoatCommand: AsyncParsableCommand {
     @MainActor
     static func runSession(
         sessionManager: SessionManager,
-        workspace: String,
+        workspace: Workspace,
         options: SessionOptions,
         claudeArguments: [String],
     ) async throws -> Session.State {

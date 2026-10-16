@@ -13,8 +13,12 @@ struct GuestVMTests {
         fixture.home.appendingPathComponent(".moat/sessions")
     }
 
+    var workspace: Workspace {
+        Workspace(folder: fixture.workspace)
+    }
+
     var hash: String {
-        GuestVM.hash(workspace: fixture.workspace)
+        workspace.hash
     }
 
     var metadataFile: URL {
@@ -28,14 +32,14 @@ struct GuestVMTests {
     /// Prepares `workspace` (by default, the fixture's) with default options
     /// changed by `configure`.
     func prepare(
-        workspace: String? = nil,
+        workspace: Workspace? = nil,
         claudeArguments: [String] = [],
         _ configure: (inout SessionOptions) -> Void = { _ in },
     ) async throws -> VMLaunchSpec {
         var options = SessionOptions()
         configure(&options)
         return try await fixture.guestVM().prepare(
-            workspace: workspace ?? fixture.workspace.path,
+            workspace: workspace ?? self.workspace,
             options: options,
             claudeArguments: claudeArguments,
         )
@@ -62,7 +66,7 @@ struct GuestVMTests {
     func resolvesWorkspaceSymlink() async throws {
         let link = fixture.root.appendingPathComponent("link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fixture.workspace)
-        let spec = try await prepare(workspace: link.path)
+        let spec = try await prepare(workspace: Workspace(folder: link))
         #expect(spec.workingDirectory == fixture.workspace.path)
     }
 
@@ -70,17 +74,21 @@ struct GuestVMTests {
     func workspaceMustBeADirectory() async throws {
         let file = try fixture.write("", path: "file")
         await #expect(throws: MoatError.notADirectory(file.path)) {
-            try await prepare(workspace: file.path)
+            try await prepare(workspace: Workspace(folder: file))
         }
         await #expect(throws: MoatError.notADirectory("/nonexistent")) {
-            try await prepare(workspace: "/nonexistent")
+            try await prepare(
+                workspace: Workspace(folder: URL(fileURLWithPath: "/nonexistent")),
+            )
         }
     }
 
     @Test
     func invalidOptionsDoNotWriteState() async throws {
         await #expect(throws: MoatError.self) {
-            try await prepare(workspace: "/nonexistent")
+            try await prepare(
+                workspace: Workspace(folder: URL(fileURLWithPath: "/nonexistent")),
+            )
         }
         let moat = fixture.home.appendingPathComponent(".moat")
         #expect(!FileManager.default.fileExists(atPath: moat.path))
@@ -150,11 +158,10 @@ struct GuestVMTests {
 
     @Test
     func vmNameReplacesDisallowedCharacters() {
-        let workspace = URL(fileURLWithPath: "/projects/my.café_app")
-        let hash = GuestVM.hash(workspace: workspace)
-        #expect(
-            GuestVM.vmName(workspace: workspace) == "moat.my-caf-_app.\(hash)"
+        let workspace = Workspace(
+            folder: URL(fileURLWithPath: "/projects/my.café_app"),
         )
+        #expect(workspace.vmName == "moat.my-caf-_app.\(workspace.hash)")
     }
 
     @Test
@@ -224,7 +231,7 @@ struct GuestVMTests {
         #expect(fileManager.fileExists(atPath: credentials.path))
         #expect(Filesystem.isDirectory(sessions.appendingPathComponent(hash)))
         #expect(try SessionMetadata.load(file: metadataFile) == SessionMetadata(
-            workspace: fixture.workspace.path,
+            workspace: workspace,
             name: "workspace",
         ))
 
@@ -273,7 +280,7 @@ struct GuestVMTests {
         try fixture.guestVM().migratePointer(file: pointerFile)
 
         #expect(try SessionMetadata.load(file: metadataFile) == SessionMetadata(
-            workspace: fixture.workspace.path,
+            workspace: workspace,
             name: "workspace",
         ))
         #expect(!FileManager.default.fileExists(atPath: pointerFile.path))
@@ -283,7 +290,7 @@ struct GuestVMTests {
     func migratePointerKeepsExistingMetadata() throws {
         try fixture.makeDirectory(".moat/sessions", base: fixture.home)
         let existing = SessionMetadata(
-            workspace: fixture.workspace.path,
+            workspace: workspace,
             name: "renamed",
         )
         try existing.write(file: metadataFile)
@@ -306,7 +313,7 @@ struct GuestVMTests {
             base: sessions,
         )
         let other = try fixture.makeDirectory("other")
-        let otherHash = GuestVM.hash(workspace: other)
+        let otherHash = Workspace(folder: other).hash
         let otherPointerFile = try fixture.write(
             other.path,
             path: "\(otherHash).pointer",
@@ -320,7 +327,7 @@ struct GuestVMTests {
             "\(otherHash).metadata.json",
         )
         #expect(
-            !FileManager.default.fileExists(atPath: otherMetadataFile.path)
+            !FileManager.default.fileExists(atPath: otherMetadataFile.path),
         )
     }
 

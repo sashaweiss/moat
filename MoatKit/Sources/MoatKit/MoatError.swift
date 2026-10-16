@@ -7,8 +7,8 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
     case duplicateSkill(String)
     case invalidSettingsFile(String)
     case invalidMetadataFile(String)
-    case sessionAlreadyRunning(String)
-    case sessionRunningElsewhere(String)
+    case sessionAlreadyRunning(Workspace)
+    case sessionRunningElsewhere(Workspace)
     case commandFailed([String], status: TerminationStatus)
 
     public var description: String {

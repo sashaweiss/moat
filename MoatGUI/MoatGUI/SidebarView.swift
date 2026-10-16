@@ -88,7 +88,7 @@ private struct SessionRow: View {
     private var caption: String {
         switch status {
         case .stopped, .idle, .busy:
-            session.workspace
+            session.workspace.path
         case .runningElsewhere:
             "Running elsewhere: \(session.workspace)"
         case .missing:

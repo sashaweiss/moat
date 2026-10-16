@@ -9,10 +9,10 @@ final class SessionsModel {
     private(set) var sessions: [SessionMetadata] = []
 
     /// The workspace of the session selected in the sidebar.
-    var selectedWorkspace: String?
+    var selectedWorkspace: Workspace?
 
     /// Each session's status, by workspace, as of `updateStatuses()`.
-    private(set) var statuses: [String: SessionStatus] = [:]
+    private(set) var statuses: [Workspace: SessionStatus] = [:]
 
     @ObservationIgnored
     private let settingsManager: SettingsManager
@@ -44,7 +44,7 @@ final class SessionsModel {
     }
 
     /// Returns the status of the session for `workspace`.
-    func status(workspace: String) -> SessionStatus {
+    func status(workspace: Workspace) -> SessionStatus {
         statuses[workspace] ?? .stopped
     }
 
@@ -76,7 +76,7 @@ final class SessionsModel {
     }
 
     private func recomputeStatuses() {
-        var statuses: [String: SessionStatus] = [:]
+        var statuses: [Workspace: SessionStatus] = [:]
         for session in sessions {
             statuses[session.workspace] = sessionManager.status(
                 session: session,
@@ -86,13 +86,13 @@ final class SessionsModel {
     }
 
     /// Returns the session started for `workspace`, if there is one.
-    func session(workspace: String) -> Session? {
+    func session(workspace: Workspace) -> Session? {
         sessionManager.session(workspace: workspace)
     }
 
     /// Starts the session for `workspace`, with the default options, and
     /// selects it.
-    func start(workspace: String) {
+    func start(workspace: Workspace) {
         selectedWorkspace = workspace
         Task {
             await _start(workspace: workspace)
@@ -100,13 +100,13 @@ final class SessionsModel {
     }
 
     /// Stops the session for `workspace`, if it's running.
-    func stop(workspace: String) {
+    func stop(workspace: Workspace) {
         Task {
             await _stop(workspace: workspace)
         }
     }
 
-    private func _start(workspace: String) async {
+    private func _start(workspace: Workspace) async {
         let session: Session
         do {
             session = try await sessionManager.start(
@@ -139,7 +139,7 @@ final class SessionsModel {
         }
     }
 
-    private func _stop(workspace: String) async {
+    private func _stop(workspace: Workspace) async {
         do {
             try await sessionManager.stop(workspace: workspace)
         } catch {
@@ -149,11 +149,16 @@ final class SessionsModel {
 
     /// The names of the sessions that are running.
     var runningSessionNames: [String] {
-        let runningWorkspaces = Set(
-            sessionManager.runningSessions.map(\.spec.workingDirectory),
-        )
-        return sessions
-            .filter { runningWorkspaces.contains($0.workspace) }
+        sessions
+            .filter { metadata in
+                let session = sessionManager.session(workspace: metadata.workspace)
+                switch session?.state {
+                case .running, .stopping:
+                    return true
+                case .exited, .signaled, .failed, nil:
+                    return false
+                }
+            }
             .map(\.name)
     }
 
