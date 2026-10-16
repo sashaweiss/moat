@@ -5,3 +5,4 @@ DerivedData/
 .swiftpm/
 xcuserdata/
 /release/
+release-identity.json
