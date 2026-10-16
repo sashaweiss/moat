@@ -28,9 +28,12 @@ public enum SessionStatus: Equatable, Sendable {
 public final class SessionManager {
     public let environment: HostEnvironment
 
-    /// The commands to run sessions' VMs.
     @ObservationIgnored
-    private let commands: SessionCommands
+    private let settingsManager: SettingsManager
+
+    private var commands: HostCommands {
+        settingsManager.hostCommands
+    }
 
     /// The sessions started by this manager, keyed by their VMs' names. A
     /// session stays here after it exits, until it's started again.
@@ -43,9 +46,12 @@ public final class SessionManager {
     /// session to be busy.
     private static let busyInterval: TimeInterval = 3
 
-    public init(environment: HostEnvironment, commands: SessionCommands) {
+    public init(
+        environment: HostEnvironment,
+        settingsManager: SettingsManager,
+    ) {
         self.environment = environment
-        self.commands = commands
+        self.settingsManager = settingsManager
     }
 
     /// Migrates every session in `~/.moat/sessions` that has only a
@@ -107,6 +113,7 @@ public final class SessionManager {
             workspace: workspace,
             options: options,
             claudeArguments: claudeArguments,
+            gitPath: commands.gitPath,
         )
         if let existing = sessions[spec.name] {
             switch existing.state {
@@ -126,7 +133,7 @@ public final class SessionManager {
             spec: spec,
             checkSystemCommand: commands.checkSystem,
             startSystemCommand: commands.startSystem,
-            startCommand: commands.start(spec),
+            startCommand: commands.startVM(spec),
             size: size,
         )
         sessions[spec.name] = session
@@ -139,7 +146,7 @@ public final class SessionManager {
         guard let session = session(workspace: workspace) else {
             return
         }
-        try await session.stop(command: commands.stop(session.spec))
+        try await session.stop(command: commands.stopVM(session.spec))
     }
 
     /// Removes `session` (which must be stopped or missing) from
@@ -188,7 +195,7 @@ public final class SessionManager {
     public func stopAll() async throws {
         let errors = await withTaskGroup(of: (any Error)?.self) { group in
             for session in runningSessions {
-                let command = commands.stop(session.spec)
+                let command = commands.stopVM(session.spec)
                 group.addTask {
                     do {
                         try await session.stop(command: command)
@@ -258,13 +265,13 @@ public final class SessionManager {
         }
 
         let result = try await Subprocess.run(
-            .path(FilePath(commands.listRunning[0])),
-            arguments: Arguments(Array(commands.listRunning.dropFirst())),
+            .path(FilePath(commands.listRunningVMs[0])),
+            arguments: Arguments(Array(commands.listRunningVMs.dropFirst())),
             output: .string(limit: 1 << 20),
         )
         guard result.terminationStatus.isSuccess else {
             throw MoatError.commandFailed(
-                commands.listRunning,
+                commands.listRunningVMs,
                 status: result.terminationStatus,
             )
         }

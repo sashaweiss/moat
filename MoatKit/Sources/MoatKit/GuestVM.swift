@@ -13,12 +13,15 @@ public struct GuestVM: Sendable {
     }
 
     /// Validates `workspace` and `options`, then prepares moat's state on
-    /// disk for them, returning a spec to launch the session. The session runs
-    /// `claude` with `claudeArguments` added.
+    /// disk for them, returning a spec to launch the session.
+    ///
+    /// - Parameter claudeArguments: arguments passed to Claude in the launch spec.
+    /// - Parameter gitPath: path to `git` on the host.
     public func prepare(
         workspace: Workspace,
         options: SessionOptions,
         claudeArguments: [String],
+        gitPath: String,
     ) async throws -> VMLaunchSpec {
         let fileManager = FileManager.default
 
@@ -98,7 +101,7 @@ public struct GuestVM: Sendable {
         if
             let commonDirectory = try await Git.commonDirectory(
                 workspace: workspace.url,
-                gitPath: options.gitPath,
+                gitPath: gitPath,
             )
         {
             gitDirectories.append(commonDirectory)

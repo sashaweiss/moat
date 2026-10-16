@@ -10,25 +10,30 @@ struct SessionManagerTests {
         fixture = try Fixture()
     }
 
-    /// A manager whose sessions run `start` and `stop` as their VM commands,
+    /// A manager whose sessions run `startVM` and `stopVM` as their VM commands,
     /// with `checkSystem` and `startSystem` for the system, and
-    /// `listRunning` to list running VMs (by default, none).
+    /// `listRunningVMs` to list running VMs (by default, none).
     func sessionManager(
         checkSystem: [String] = ["/usr/bin/true"],
         startSystem: [String] = ["/usr/bin/false"],
-        start: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/true"] },
-        stop: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/false"] },
-        listRunning: [String] = ["/usr/bin/true"],
+        startVM: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/true"] },
+        stopVM: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/false"] },
+        listRunningVMs: [String] = ["/usr/bin/true"],
     ) -> SessionManager {
-        SessionManager(
+        let settingsManager = SettingsManager(
             environment: fixture.environment,
-            commands: SessionCommands(
+            hostCommands: HostCommands(
                 checkSystem: checkSystem,
                 startSystem: startSystem,
-                start: start,
-                stop: stop,
-                listRunning: listRunning,
+                startVM: startVM,
+                stopVM: stopVM,
+                listRunningVMs: listRunningVMs,
+                gitPath: "/usr/bin/git",
             ),
+        )
+        return SessionManager(
+            environment: fixture.environment,
+            settingsManager: settingsManager,
         )
     }
 
@@ -141,7 +146,7 @@ struct SessionManagerTests {
     @Test
     func startRunsSession() async throws {
         let sessionManager = sessionManager(
-            start: { _ in ["/bin/sh", "-c", "echo started; read line"] },
+            startVM: { _ in ["/bin/sh", "-c", "echo started; read line"] },
         )
         let session = try await start(sessionManager)
         #expect(sessionManager.sessions[session.spec.name] === session)
@@ -156,7 +161,7 @@ struct SessionManagerTests {
     @Test
     func startUsesOptionsAndClaudeArguments() async throws {
         // The VM command prints the parts of the spec it's given.
-        let sessionManager = sessionManager(start: { spec in
+        let sessionManager = sessionManager(startVM: { spec in
             ["/bin/echo", spec.memory] + spec.command
         })
         var options = SessionOptions()
@@ -206,7 +211,7 @@ struct SessionManagerTests {
 
     @Test
     func startFailsIfAlreadyRunning() async throws {
-        let sessionManager = sessionManager(start: { _ in
+        let sessionManager = sessionManager(startVM: { _ in
             ["/bin/sh", "-c", "read line"]
         })
         let session = try await start(sessionManager)
@@ -234,14 +239,14 @@ struct SessionManagerTests {
     func stopStopsSession() async throws {
         let pidFile = fixture.root.appendingPathComponent("pid")
         let sessionManager = sessionManager(
-            start: { _ in
+            startVM: { _ in
                 [
                     "/bin/sh",
                     "-c",
                     "echo $$ > '\(pidFile.path)'; echo ready; exec sleep 100",
                 ]
             },
-            stop: { _ in
+            stopVM: { _ in
                 ["/bin/sh", "-c", "kill -TERM $(cat '\(pidFile.path)')"]
             },
         )
@@ -257,7 +262,7 @@ struct SessionManagerTests {
     func killableSessionManager() -> SessionManager {
         let root = fixture.root.path
         return sessionManager(
-            start: { spec in
+            startVM: { spec in
                 [
                     "/bin/sh",
                     "-c",
@@ -265,7 +270,7 @@ struct SessionManagerTests {
                         + "exec sleep 100",
                 ]
             },
-            stop: { spec in
+            stopVM: { spec in
                 [
                     "/bin/sh",
                     "-c",
@@ -304,7 +309,7 @@ struct SessionManagerTests {
     @Test
     func stopAllThrowsIfStoppingFails() async throws {
         // The default stop command fails.
-        let sessionManager = sessionManager(start: { _ in
+        let sessionManager = sessionManager(startVM: { _ in
             ["/bin/sh", "-c", "echo ready; read line"]
         })
         let session = try await start(sessionManager)
@@ -338,7 +343,7 @@ struct SessionManagerTests {
     @Test
     func statusIsRunningElsewhereWhenItsVMIsListed() async throws {
         let sessionManager = sessionManager(
-            listRunning: ["/bin/echo", "other-vm\n\(metadata.workspace.vmName)"],
+            listRunningVMs: ["/bin/echo", "other-vm\n\(metadata.workspace.vmName)"],
         )
         try await sessionManager.refreshRunningVMs()
         #expect(sessionManager.status(session: metadata) == .runningElsewhere)
@@ -349,7 +354,7 @@ struct SessionManagerTests {
         // Listing would fail, but isn't attempted.
         let sessionManager = sessionManager(
             checkSystem: ["/usr/bin/false"],
-            listRunning: ["/usr/bin/false"],
+            listRunningVMs: ["/usr/bin/false"],
         )
         try await sessionManager.refreshRunningVMs()
         #expect(sessionManager.status(session: metadata) == .stopped)
@@ -357,7 +362,7 @@ struct SessionManagerTests {
 
     @Test
     func refreshFailsIfListingFails() async throws {
-        let sessionManager = sessionManager(listRunning: ["/usr/bin/false"])
+        let sessionManager = sessionManager(listRunningVMs: ["/usr/bin/false"])
         await #expect(throws: MoatError.self) {
             try await sessionManager.refreshRunningVMs()
         }
@@ -370,7 +375,7 @@ struct SessionManagerTests {
         let sessionManager = sessionManager(
             checkSystem: ["/bin/test", "-e", marker.path],
             startSystem: ["/usr/bin/touch", marker.path],
-            listRunning: ["/usr/bin/false"],
+            listRunningVMs: ["/usr/bin/false"],
         )
         let session = try await start(sessionManager)
         await session.waitForExit()
@@ -379,7 +384,7 @@ struct SessionManagerTests {
 
     @Test
     func statusIsBusyThenIdle() async throws {
-        let sessionManager = sessionManager(start: { _ in
+        let sessionManager = sessionManager(startVM: { _ in
             ["/bin/sh", "-c", "echo ready; read line"]
         })
         let session = try await start(sessionManager)
@@ -397,7 +402,7 @@ struct SessionManagerTests {
     @Test
     func startFailsIfRunningElsewhere() async throws {
         let sessionManager = sessionManager(
-            listRunning: ["/bin/echo", metadata.workspace.vmName],
+            listRunningVMs: ["/bin/echo", metadata.workspace.vmName],
         )
         await #expect(throws: MoatError.sessionRunningElsewhere(workspace)) {
             try await start(sessionManager)
@@ -433,7 +438,7 @@ struct SessionManagerTests {
 
     @Test
     func removeRefusesRunningSession() async throws {
-        let sessionManager = sessionManager(start: { _ in
+        let sessionManager = sessionManager(startVM: { _ in
             ["/bin/sh", "-c", "echo ready; read line"]
         })
         let session = try await start(sessionManager)
@@ -451,7 +456,7 @@ struct SessionManagerTests {
     @Test
     func removeRefusesSessionRunningElsewhere() async throws {
         let sessionManager = sessionManager(
-            listRunning: ["/bin/echo", metadata.workspace.vmName],
+            listRunningVMs: ["/bin/echo", metadata.workspace.vmName],
         )
         await #expect(throws: MoatError.sessionRunning(workspace)) {
             try await sessionManager.remove(session: metadata)

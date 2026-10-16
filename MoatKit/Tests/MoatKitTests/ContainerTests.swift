@@ -29,19 +29,23 @@ struct ContainerTests {
     }
 
     @Test
-    func sessionCommands() {
-        let commands = Container.sessionCommands(executable: "/bin/container")
+    func hostCommands() {
+        var settings = HostSettings()
+        settings.containerPath = "/bin/container"
+        settings.gitPath = "/opt/bin/git"
+        let commands = Container.hostCommands(settings: settings)
         #expect(commands.checkSystem == ["/bin/container", "system", "status"])
         #expect(commands.startSystem == ["/bin/container", "system", "start"])
         #expect(
-            commands.start(spec())
+            commands.startVM(spec())
                 == Container.startCommand(
                     spec: spec(),
                     executable: "/bin/container",
                 ),
         )
-        #expect(commands.stop(spec()) == ["/bin/container", "stop", "moat.ws"])
-        #expect(commands.listRunning == ["/bin/container", "list", "--quiet"])
+        #expect(commands.stopVM(spec()) == ["/bin/container", "stop", "moat.ws"])
+        #expect(commands.listRunningVMs == ["/bin/container", "list", "--quiet"])
+        #expect(commands.gitPath == "/opt/bin/git")
     }
 
     @Test

@@ -109,7 +109,7 @@ final class SessionsModel {
         do {
             session = try await sessionManager.start(
                 workspace: workspace,
-                options: try settingsManager.loadSettings(),
+                options: settingsManager.sessionOptions,
                 claudeArguments: [],
                 // The terminal showing the session resizes it to fit.
                 size: TerminalSize(columns: 80, rows: 24),

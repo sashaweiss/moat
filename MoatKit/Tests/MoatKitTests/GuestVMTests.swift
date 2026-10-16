@@ -42,6 +42,7 @@ struct GuestVMTests {
             workspace: workspace ?? self.workspace,
             options: options,
             claudeArguments: claudeArguments,
+            gitPath: "/usr/bin/git",
         )
     }
 

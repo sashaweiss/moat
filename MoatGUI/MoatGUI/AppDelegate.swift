@@ -17,21 +17,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         let environment = HostEnvironment()
-        let settingsManager = SettingsManager(environment: environment)
-        let settings: SessionOptions
+        let settingsManager: SettingsManager
         do {
-            settings = try settingsManager.loadSettings()
+            settingsManager = try SettingsManager.load(environment: environment)
         } catch {
             Logger.error("Couldn't load settings: \(error)")
-            settings = SessionOptions()
+            let alert = NSAlert(error: error)
+            alert.messageText = "Moat couldn't read its settings."
+            alert.informativeText = """
+                Fix or remove \(environment.settingsFile.path), then reopen \
+                Moat.
+
+                \(error)
+                """
+            alert.runModal()
+            exit(1)
         }
         sessionsModel = SessionsModel(
             settingsManager: settingsManager,
             sessionManager: SessionManager(
                 environment: environment,
-                commands: Container.sessionCommands(
-                    executable: settings.containerPath,
-                ),
+                settingsManager: settingsManager,
             ),
         )
         super.init()

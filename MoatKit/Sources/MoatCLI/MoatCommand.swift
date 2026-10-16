@@ -71,13 +71,11 @@ struct MoatCommand: AsyncParsableCommand {
 
     func run() async throws {
         let environment = HostEnvironment()
-        let settingsManager = await SettingsManager(environment: environment)
-        let options = options(defaults: try await settingsManager.loadSettings())
+        let settingsManager = try await SettingsManager.load(environment: environment)
+        let options = options(defaults: await settingsManager.sessionOptions)
         let sessionManager = await SessionManager(
             environment: environment,
-            commands: Container.sessionCommands(
-                executable: options.containerPath,
-            ),
+            settingsManager: settingsManager,
         )
 
         print("moat: run claude in \"\(workspace.name)\" with permission mode \"\(options.permissionMode)\"?")

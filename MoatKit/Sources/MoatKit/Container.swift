@@ -2,15 +2,17 @@ import Foundation
 
 /// Runs agent VMs using Apple's `container` tool.
 public enum Container {
-    /// Returns the commands a `SessionManager` uses to run VMs with the
-    /// `container` tool at `executable`.
-    public static func sessionCommands(executable: String) -> SessionCommands {
-        SessionCommands(
+
+    /// Assembles a `HostCommands` backed by `container`.
+    public static func hostCommands(settings: HostSettings) -> HostCommands {
+        let executable = settings.containerPath
+        return HostCommands(
             checkSystem: [executable, "system", "status"],
             startSystem: [executable, "system", "start"],
-            start: { spec in startCommand(spec: spec, executable: executable) },
-            stop: { spec in stopCommand(spec: spec, executable: executable) },
-            listRunning: [executable, "list", "--quiet"],
+            startVM: { spec in startCommand(spec: spec, executable: executable) },
+            stopVM: { spec in stopCommand(spec: spec, executable: executable) },
+            listRunningVMs: [executable, "list", "--quiet"],
+            gitPath: settings.gitPath,
         )
     }
 

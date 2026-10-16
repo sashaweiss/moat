@@ -3,33 +3,21 @@ import Testing
 @testable import MoatKit
 
 struct SessionOptionsTests {
-    let fixture: Fixture
-
-    init() throws {
-        fixture = try Fixture()
-    }
-
-    func load(_ json: String) throws -> SessionOptions {
-        try SessionOptions.load(file: fixture.write(json, path: "settings.json"))
-    }
-
-    @Test
-    func missingFileIsDefaults() throws {
-        let missing = fixture.root.appendingPathComponent("missing.json")
-        #expect(try SessionOptions.load(file: missing) == SessionOptions())
+    func decode(_ json: String) throws -> SessionOptions {
+        try JSONDecoder().decode(SessionOptions.self, from: Data(json.utf8))
     }
 
     @Test
     func missingKeysAreDefaults() throws {
-        let options = try load(#"{"model": "sonnet"}"#)
+        let options = try decode(#"{"model": "sonnet"}"#)
         var expected = SessionOptions()
         expected.model = "sonnet"
         #expect(options == expected)
     }
 
     @Test
-    func loadsAllKeys() throws {
-        let options = try load("""
+    func decodesAllKeys() throws {
+        let options = try decode("""
         {
             "addSkills": ["~/a", "/b"],
             "cpus": 4,
@@ -38,8 +26,6 @@ struct SessionOptionsTests {
             "memory": "8G",
             "model": "sonnet",
             "noClaudeSettings": true,
-            "containerPath": "/opt/bin/container",
-            "gitPath": "/opt/bin/git",
             "permissionMode": "plan",
             "someFutureKey": 42
         }
@@ -51,8 +37,6 @@ struct SessionOptionsTests {
         #expect(options.memory == "8G")
         #expect(options.model == "sonnet")
         #expect(options.noClaudeSettings == true)
-        #expect(options.containerPath == "/opt/bin/container")
-        #expect(options.gitPath == "/opt/bin/git")
         #expect(options.permissionMode == "plan")
     }
 
@@ -62,8 +46,6 @@ struct SessionOptionsTests {
         #"{"model": 3}"#,
         #"{"noClaudeSettings": 1}"#,
         #"{"noClaudeSettings": "yes"}"#,
-        #"{"containerPath": 1}"#,
-        #"{"gitPath": 1}"#,
         #"{"addSkills": "~/a"}"#,
         #"{"addSkills": ["~/a", 2]}"#,
         #"{"gitAccessMode": "admin"}"#,
@@ -71,9 +53,8 @@ struct SessionOptionsTests {
         #"{"memory": 8}"#,
     ])
     func invalid(json: String) throws {
-        let url = fixture.root.appendingPathComponent("settings.json")
-        #expect(throws: MoatError.invalidSettingsFile(url.path)) {
-            try load(json)
+        #expect(throws: DecodingError.self) {
+            try decode(json)
         }
     }
 }
