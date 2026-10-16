@@ -33,6 +33,12 @@ let package = Package(
                 ),
             ],
         ),
+        .executableTarget(name: "VersionGenerator"),
+        .plugin(
+            name: "VersionPlugin",
+            capability: .buildTool(),
+            dependencies: ["VersionGenerator"],
+        ),
         .executableTarget(
             name: "MoatCLI",
             dependencies: [
@@ -46,6 +52,7 @@ let package = Package(
                     condition: .when(platforms: [.linux]),
                 ),
             ],
+            plugins: ["VersionPlugin"],
         ),
         .testTarget(
             name: "MoatKitTests",

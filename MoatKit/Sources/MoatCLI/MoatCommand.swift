@@ -20,6 +20,7 @@ struct MoatCommand: AsyncParsableCommand {
             Any additional arguments are forwarded to `claude` inside the container. \
             Defaults may be set in \(HostEnvironment().settingsFile.path).
             """,
+            version: moatVersion,
         )
     }
 

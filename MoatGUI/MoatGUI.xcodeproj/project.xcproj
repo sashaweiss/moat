@@ -1,8 +1,8 @@
 {
   "default-configuration": "Release",
   "configurations": [
-    "Debug",
-    "Release",
+    { "name": "Debug", "file": "Version.xcconfig" },
+    { "name": "Release", "file": "Version.xcconfig" },
   ],
   "localizations": {
     "development": "en",
@@ -24,6 +24,7 @@
   ],
   "files": [
     { "kind": "folder", "path": "MoatGUI", "target-membership": [ "MoatGUI" ] },
+    { "path": "<PROJECT>/../Version.xcconfig", "target-membership": [ "MoatGUI/resources" ] },
     {
       "kind": "group",
       "name": "Products",
@@ -76,7 +77,6 @@
         "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone": "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight",
         "LD_RUNPATH_SEARCH_PATHS": "@executable_path/Frameworks",
         "LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]": "@executable_path/../Frameworks",
-        "MARKETING_VERSION": "0.1",
         "PRODUCT_BUNDLE_IDENTIFIER": "com.alexanderweiss.MoatGUI",
         "REGISTER_APP_GROUPS": "YES",
         "RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES": "NO",
