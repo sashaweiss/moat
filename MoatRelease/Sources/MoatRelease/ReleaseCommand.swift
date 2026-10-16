@@ -171,7 +171,8 @@ struct ReleaseCommand: AsyncParsableCommand {
     }
 
     /// Tags the release `tag`, pushes the tag to `remote`, and creates a
-    /// draft GitHub release of `artifacts`.
+    /// draft GitHub release of `artifacts`, with the `Containerfile` to build
+    /// moat's image.
     func publish(
         artifacts: [Artifact],
         version: String,
@@ -192,7 +193,7 @@ struct ReleaseCommand: AsyncParsableCommand {
         log("Creating a draft GitHub release")
         let files = artifacts.flatMap { artifact in
             [artifact.zip.path, artifact.checksum.path]
-        }
+        } + [repository.appending(path: "Containerfile").path]
         try await runShowingOutput(
             ["gh", "release", "create", tag]
                 + files
