@@ -7,6 +7,16 @@ import SystemPackage
 #endif
 @testable import MoatKit
 
+/// The path in `error`, if it's `MoatError.invalidSettingsFile`.
+func invalidSettingsFilePath(_ error: MoatError?) -> String? {
+    switch error {
+    case .invalidSettingsFile(let path, _):
+        path
+    default:
+        nil
+    }
+}
+
 /// A scratch directory with a fake home and workspace, removed on deinit.
 final class Fixture {
     let root: URL

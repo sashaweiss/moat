@@ -5,7 +5,7 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
     case notADirectory(String)
     case notAFile(String)
     case duplicateSkill(String)
-    case invalidSettingsFile(String)
+    case invalidSettingsFile(String, reason: String)
     case invalidMetadataFile(String)
     case sessionAlreadyRunning(Workspace)
     case sessionRunningElsewhere(Workspace)
@@ -20,8 +20,8 @@ public enum MoatError: Error, Equatable, CustomStringConvertible, LocalizedError
             "not a file: \(path)"
         case .duplicateSkill(let name):
             "duplicate skill: \(name)"
-        case .invalidSettingsFile(let path):
-            "invalid settings file: \(path)"
+        case .invalidSettingsFile(let path, let reason):
+            "invalid settings file \(path): \(reason)"
         case .invalidMetadataFile(let path):
             "invalid session metadata file: \(path)"
         case .sessionRunning(let workspace):

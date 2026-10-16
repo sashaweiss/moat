@@ -143,9 +143,20 @@ public struct GuestVM: Sendable {
                 fileManager.fileExists(atPath: hostClaudeSettingsFile.path)
             {
                 let data = try Data(contentsOf: hostClaudeSettingsFile)
-                let object = try? JSONSerialization.jsonObject(with: data)
+                let object: Any
+                do {
+                    object = try JSONSerialization.jsonObject(with: data)
+                } catch {
+                    throw MoatError.invalidSettingsFile(
+                        hostClaudeSettingsFile.path,
+                        reason: "it isn't valid JSON",
+                    )
+                }
                 guard let hostClaudeSettings = object as? [String: Any] else {
-                    throw MoatError.invalidSettingsFile(hostClaudeSettingsFile.path)
+                    throw MoatError.invalidSettingsFile(
+                        hostClaudeSettingsFile.path,
+                        reason: "it isn't a JSON object",
+                    )
                 }
                 claudeSettings = hostClaudeSettings
             }

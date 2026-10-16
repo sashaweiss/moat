@@ -357,13 +357,15 @@ struct GuestVMTests {
     @Test
     func invalidHostClaudeSettings() async throws {
         let url = try fixture.write("[]", path: ".claude/settings.json", base: fixture.home)
-        await #expect(throws: MoatError.invalidSettingsFile(url.path)) {
+        let notAnObjectError = await #expect(throws: MoatError.self) {
             try await prepare()
         }
+        #expect(invalidSettingsFilePath(notAnObjectError) == url.path)
         try fixture.write("{", path: ".claude/settings.json", base: fixture.home)
-        await #expect(throws: MoatError.invalidSettingsFile(url.path)) {
+        let invalidJSONError = await #expect(throws: MoatError.self) {
             try await prepare()
         }
+        #expect(invalidSettingsFilePath(invalidJSONError) == url.path)
     }
 
     @Test

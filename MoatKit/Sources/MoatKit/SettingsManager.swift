@@ -54,7 +54,10 @@ public final class SettingsManager {
                     .decode(SettingsFile.self, from: data)
                     .sessionDefaults ?? SessionOptions()
             } catch {
-                throw MoatError.invalidSettingsFile(file.path)
+                throw MoatError.invalidSettingsFile(
+                    file.path,
+                    reason: String(describing: error),
+                )
             }
         }
 

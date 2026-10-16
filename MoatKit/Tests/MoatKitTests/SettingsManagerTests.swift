@@ -25,9 +25,10 @@ struct SettingsManagerTests {
             path: ".moat/settings.json",
             base: fixture.home,
         )
-        #expect(throws: MoatError.invalidSettingsFile(url.path)) {
+        let error = #expect(throws: MoatError.self) {
             try SettingsManager.load(environment: fixture.environment)
         }
+        #expect(invalidSettingsFilePath(error) == url.path)
     }
 
     @Test
@@ -70,9 +71,10 @@ struct SettingsManagerTests {
             path: ".moat/settings.json",
             base: fixture.home,
         )
-        #expect(throws: MoatError.invalidSettingsFile(url.path)) {
+        let error = #expect(throws: MoatError.self) {
             try settingsManager.load()
         }
+        #expect(invalidSettingsFilePath(error) == url.path)
         #expect(settingsManager.sessionOptions.model == "sonnet")
         #expect(settingsManager.hostSettings == HostSettings())
     }
@@ -89,9 +91,10 @@ struct SettingsManagerTests {
             path: ".moat/settings.json",
             base: fixture.home,
         )
-        #expect(throws: MoatError.invalidSettingsFile(url.path)) {
+        let error = #expect(throws: MoatError.self) {
             try settingsManager.load()
         }
+        #expect(invalidSettingsFilePath(error) == url.path)
     }
 
     @Test
