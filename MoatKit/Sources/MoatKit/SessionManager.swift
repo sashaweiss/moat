@@ -111,4 +111,44 @@ public final class SessionManager {
         }
         try await session.stop(command: commands.stop(session.spec))
     }
+
+    /// This manager's sessions that are running (or stopping).
+    public var runningSessions: [Session] {
+        sessions.values.filter { session in
+            switch session.state {
+            case .running, .stopping:
+                true
+            case .exited, .signaled, .failed:
+                false
+            }
+        }
+    }
+
+    /// Stops every running session at once, and waits for them to exit. If
+    /// any fail to stop, still stops the rest, then throws the first failure.
+    public func stopAll() async throws {
+        let errors = await withTaskGroup(of: (any Error)?.self) { group in
+            for session in runningSessions {
+                let command = commands.stop(session.spec)
+                group.addTask {
+                    do {
+                        try await session.stop(command: command)
+                        return nil
+                    } catch {
+                        return error
+                    }
+                }
+            }
+            var errors: [any Error] = []
+            for await error in group {
+                if let error {
+                    errors.append(error)
+                }
+            }
+            return errors
+        }
+        if let error = errors.first {
+            throw error
+        }
+    }
 }

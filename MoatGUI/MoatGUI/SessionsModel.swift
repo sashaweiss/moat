@@ -101,4 +101,23 @@ final class SessionsModel {
             Logger.error("Couldn't stop session for \(workspace): \(error)")
         }
     }
+
+    /// The names of the sessions that are running.
+    var runningSessionNames: [String] {
+        let runningWorkspaces = Set(
+            sessionManager.runningSessions.map(\.spec.workingDirectory),
+        )
+        return sessions
+            .filter { runningWorkspaces.contains($0.workspace) }
+            .map(\.name)
+    }
+
+    /// Stops every running session, and waits for them to exit.
+    func stopAll() async {
+        do {
+            try await sessionManager.stopAll()
+        } catch {
+            Logger.error("Couldn't stop every session: \(error)")
+        }
+    }
 }

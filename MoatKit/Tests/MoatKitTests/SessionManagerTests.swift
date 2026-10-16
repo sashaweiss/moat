@@ -241,4 +241,71 @@ struct SessionManagerTests {
         try await sessionManager.stop(workspace: workspace)
         #expect(session.state == .signaled(signal: SIGTERM))
     }
+
+    /// A manager whose sessions each record their PID in a file named after
+    /// their VM, and whose stop command sends that PID SIGTERM.
+    func killableSessionManager() -> SessionManager {
+        let root = fixture.root.path
+        return sessionManager(
+            start: { spec in
+                [
+                    "/bin/sh",
+                    "-c",
+                    "echo $$ > '\(root)/\(spec.name).pid'; echo ready; "
+                        + "exec sleep 100",
+                ]
+            },
+            stop: { spec in
+                [
+                    "/bin/sh",
+                    "-c",
+                    "kill -TERM $(cat '\(root)/\(spec.name).pid')",
+                ]
+            },
+        )
+    }
+
+    @Test
+    func stopAllStopsEverySession() async throws {
+        let sessionManager = killableSessionManager()
+        let other = try fixture.makeDirectory("other")
+        let first = try await start(sessionManager)
+        let second = try await sessionManager.start(
+            workspace: other.path,
+            options: SessionOptions(),
+            claudeArguments: [],
+            size: TerminalSize(columns: 80, rows: 24),
+        )
+        try await waitForOutput("ready", session: first)
+        try await waitForOutput("ready", session: second)
+        #expect(sessionManager.runningSessions.count == 2)
+
+        try await sessionManager.stopAll()
+        #expect(first.state == .signaled(signal: SIGTERM))
+        #expect(second.state == .signaled(signal: SIGTERM))
+        #expect(sessionManager.runningSessions.isEmpty)
+    }
+
+    @Test
+    func stopAllWithoutSessions() async throws {
+        try await sessionManager().stopAll()
+    }
+
+    @Test
+    func stopAllThrowsIfStoppingFails() async throws {
+        // The default stop command fails.
+        let sessionManager = sessionManager(start: { _ in
+            ["/bin/sh", "-c", "echo ready; read line"]
+        })
+        let session = try await start(sessionManager)
+        try await waitForOutput("ready", session: session)
+
+        await #expect(throws: MoatError.self) {
+            try await sessionManager.stopAll()
+        }
+        #expect(sessionManager.runningSessions.count == 1)
+
+        session.write(ArraySlice("\r".utf8))
+        await session.waitForExit()
+    }
 }
