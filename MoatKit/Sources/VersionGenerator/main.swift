@@ -10,6 +10,7 @@ guard arguments.count == 3 else {
     print("usage: VersionGenerator <xcconfig file> <output file>")
     exit(1)
 }
+
 let xcconfigFile = URL(filePath: arguments[1])
 let outputFile = URL(filePath: arguments[2])
 
@@ -25,16 +26,17 @@ for line in xcconfig.split(separator: "\n") {
     }
     version = parts[1].trimmingCharacters(in: .whitespaces)
 }
+
 guard let version, !version.isEmpty else {
     print("error: no MARKETING_VERSION in \(xcconfigFile.path)")
     exit(1)
 }
 
 let source = """
-    // Generated from \(xcconfigFile.lastPathComponent). Do not edit.
+// Generated from \(xcconfigFile.lastPathComponent). Do not edit.
 
-    /// moat's version, as `moat --version` prints it.
-    let moatVersion = "\(version)"
+/// moat's version, as `moat --version` prints it.
+let moatVersion = "\(version)"
 
-    """
+"""
 try source.write(to: outputFile, atomically: true, encoding: .utf8)

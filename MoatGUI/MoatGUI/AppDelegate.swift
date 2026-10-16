@@ -76,9 +76,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = "No sessions are running."
         } else {
             alert.informativeText = """
-                These sessions will be stopped:
-                \(runningSessionNames.joined(separator: "\n"))
-                """
+            These sessions will be stopped:
+            \(runningSessionNames.joined(separator: "\n"))
+            """
         }
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")

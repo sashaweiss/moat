@@ -38,7 +38,7 @@ struct ContainerTests {
                 == Container.startCommand(
                     spec: spec(),
                     executable: "/bin/container",
-                )
+                ),
         )
         #expect(commands.stop(spec()) == ["/bin/container", "stop", "moat.ws"])
         #expect(commands.listRunning == ["/bin/container", "list", "--quiet"])

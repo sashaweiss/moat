@@ -11,6 +11,8 @@
 # adding a new option, that any potential interactions with other existing
 # rules/options is accounted for.
 
+--exclude **/.build,**/DerivedData,release
+
 --rules andOperator
 --rules anyObjectProtocol
 --rules blankLinesAroundMark

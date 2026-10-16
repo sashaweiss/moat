@@ -16,10 +16,10 @@ struct ReleaseCommand: AsyncParsableCommand {
         commandName: "moat-release",
         abstract: "Builds, signs, notarizes, and publishes a release of moat.",
         discussion: """
-            The version comes from Version.xcconfig. The release is tagged \
-            v<version>, and published to GitHub as a draft. Builds and \
-            artifacts go in release/.
-            """,
+        The version comes from Version.xcconfig. The release is tagged \
+        v<version>, and published to GitHub as a draft. Builds and \
+        artifacts go in release/.
+        """,
     )
 
     @Option(help: ArgumentHelp(
@@ -220,7 +220,7 @@ struct ReleaseCommand: AsyncParsableCommand {
             if
                 parts.count == 2,
                 parts[0].trimmingCharacters(in: .whitespaces)
-                    == "MARKETING_VERSION"
+                == "MARKETING_VERSION"
             {
                 return parts[1].trimmingCharacters(in: .whitespaces)
             }
