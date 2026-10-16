@@ -200,7 +200,7 @@ struct ReleaseCommand: AsyncParsableCommand {
                 + [
                     "--draft",
                     "--title",
-                    "moat \(version)",
+                    "\(tag)",
                     "--generate-notes",
                 ],
             directory: repository,
