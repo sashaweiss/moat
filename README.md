@@ -42,6 +42,21 @@ container build -t moat:latest
 >
 > `container build -t moat:latest --no-cache`
 
+1. Install `moat` itself. Download `moat-<version>-macos-arm64.zip` from [Releases](https://github.com/sashaweiss/moat/releases), unzip it, and add it to your `PATH`:
+
+### Building from source
+
+Alternatively, build `moat` from source. From this directory:
+
+```sh
+swift build -c release --package-path MoatKit
+./moat # symlink to the built product
+```
+
+### Releases
+
+For releasing, see `MoatRelease/`.
+
 ## Usage
 
 ```sh
