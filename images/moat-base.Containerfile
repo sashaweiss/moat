@@ -14,5 +14,3 @@ ENV PATH="/home/robot/.local/bin:$PATH"
 
 # Pre-create ~/.claude, so we can mount state from previous moat runs into it.
 RUN mkdir -p /home/robot/.claude
-
-USER root

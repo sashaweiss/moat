@@ -175,8 +175,8 @@ struct ReleaseCommand: AsyncParsableCommand {
     }
 
     /// Tags the release `tag`, pushes the tag to `remote`, and creates a
-    /// draft GitHub release of `artifacts`, with the `Containerfile` to build
-    /// moat's image.
+    /// draft GitHub release of `artifacts`, with the Containerfiles in
+    /// `images/` to build moat's images.
     func publish(
         artifacts: [Artifact],
         version: String,
@@ -184,6 +184,16 @@ struct ReleaseCommand: AsyncParsableCommand {
         repository: URL,
         remote: String,
     ) async throws {
+        // Find these first, so a missing directory fails before tagging.
+        let containerfiles = try FileManager.default
+            .contentsOfDirectory(
+                at: repository.appending(path: "images"),
+                includingPropertiesForKeys: nil,
+            )
+            .filter { $0.pathExtension == "Containerfile" }
+            .map(\.path)
+            .sorted()
+
         log("Tagging \(tag)")
         try await runShowingOutput(
             ["git", "tag", "-a", tag, "-m", "moat \(version)"],
@@ -197,7 +207,7 @@ struct ReleaseCommand: AsyncParsableCommand {
         log("Creating a draft GitHub release")
         let files = artifacts.flatMap { artifact in
             [artifact.zip.path, artifact.checksum.path]
-        } + [repository.appending(path: "Containerfile").path]
+        } + containerfiles
         try await runShowingOutput(
             ["gh", "release", "create", tag]
                 + files

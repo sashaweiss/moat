@@ -1,15 +1,13 @@
 # moat
 
-Uses Apple's native, open-source [`container`](https://github.com/apple/container) tool to isolate a Claude Code instance to a specific directory.
+Uses Apple's native, open-source [`container`](https://github.com/apple/container) tool to isolate Claude Code in a Linux VM tied to a workspace.
 
 Features:
 
 - Isolated: Claude can't access files outside the project it's working on.
 - Performant: `container` is optimized for Apple Silicon.
-- Resumable: `.claude/` directories inside the container are persisted in `$HOME/.moat`, so `moat` sessions can be resumed.
-- Shared context: shares your working directory from the host machine to `container` using a volume mount, mirroring changes.
-- Shared Claude settings: your `CLAUDE.md` and `settings.json` from `$HOME/.claude` are shared with the VM.
-- Persistent credentials: once you log into Claude in `moat`, it stores your credentials in `$HOME/.moat` and shares those credentials across sessions so you stay logged in.
+- Resumable: Claude memory and session state are saved per-workspace.
+- Personal: `moat` sessions use your host's Claude settings.
 
 > [!WARNING]
 > `container` doesn't support network firewalling, so Claude Code in the VM will have full network access. Take care as to the contents of the directory you give to `moat`.
@@ -19,7 +17,7 @@ Features:
 
 ## Installing
 
-Before running `moat` for the first time, you'll need to install some stuff.
+Before running `moat` for the first time, you need to install some stuff.
 
 1. Install [`container` from Github Releases](https://github.com/apple/container/releases), using the `.pkg` installer.
 
@@ -31,16 +29,17 @@ softwareupdate --install-rosetta --agree-to-license
 
 1. Run `container system start`. This will prompt you to install a default kernel.
 
-1. Build the `moat` container. From this directory:
+1. Build `moat`'s VM image. From this directory:
 
 ```sh
-container build -t moat:latest
+make image
 ```
 
 > [!NOTE]
-> To update `moat`'s version of Claude Code, rebuild the container:
->
-> `container build -t moat:latest --no-cache`
+> To update `moat`'s version of Claude Code, rebuild the image.
+
+> [!NOTE]
+> The default image is `moat:base`. See `images/` for others, and `--image` to use them.
 
 1. Install `moat` itself. Download `moat-<version>-macos-arm64.zip` from [Releases](https://github.com/sashaweiss/moat/releases), unzip it, and add it to your `PATH`.
 
@@ -49,13 +48,13 @@ container build -t moat:latest
 Alternatively, build `moat` from source. From this directory:
 
 ```sh
-swift build -c release --package-path MoatKit
+make
 ./moat # symlink to the built product
 ```
 
 ### Releases
 
-For releasing, see `MoatRelease/`.
+For releasing, see `MoatRelease/` and `make release`.
 
 ## Usage
 
@@ -67,14 +66,4 @@ For full config options, see:
 
 ```
 moat --help
-```
-
-### --env-file
-
-`--env-file` points to a `KEY=VALUE` file whose contents are injected as environment variables inside the container. Use this to inject secrets to Claude, such as API tokens.
-
-```sh
-echo 'MY_TOKEN=lalalala' > "$HOME/.moat/tokens.env"
-chmod 600 "$HOME/.moat/tokens.env"
-moat <path-to-repo> --env-file "$HOME/.moat/tokens.env"
 ```

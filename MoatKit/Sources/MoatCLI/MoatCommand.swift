@@ -63,6 +63,9 @@ struct MoatCommand: AsyncParsableCommand {
     @Option(help: "memory for the VM, e.g. 8G (default: 4G)")
     var memory: String?
 
+    @Option(help: "image to run in the VM (default: moat:base)")
+    var image: String?
+
     @Flag(help: "don't seed new sessions with the host's ~/.claude/settings.json")
     var noClaudeSettings = false
 
@@ -203,6 +206,9 @@ struct MoatCommand: AsyncParsableCommand {
         }
         if let memory {
             options.memory = memory
+        }
+        if let image {
+            options.image = image
         }
         if noClaudeSettings {
             options.noClaudeSettings = true

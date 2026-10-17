@@ -18,6 +18,8 @@ public struct SessionOptions: Equatable, Codable, Sendable {
     public var cpus: Int = 2
     /// Memory for the VM.
     public var memory: String = "4G"
+    /// Image to run in the VM.
+    public var image: String = "moat:base"
     /// File of KEY=VALUE secrets to inject as environment variables.
     public var envFile: String?
     /// Skill directories to mount into the VM, in addition to the host's
@@ -48,6 +50,9 @@ public struct SessionOptions: Equatable, Codable, Sendable {
         memory = try container
             .decodeIfPresent(String.self, forKey: .memory)
             ?? memory
+        image = try container
+            .decodeIfPresent(String.self, forKey: .image)
+            ?? image
         envFile = try container
             .decodeIfPresent(String.self, forKey: .envFile)
         addSkills = try container

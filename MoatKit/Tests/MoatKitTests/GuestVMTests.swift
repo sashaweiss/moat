@@ -58,9 +58,16 @@ struct GuestVMTests {
         let spec = try await prepare()
         #expect(spec.cpus == 2)
         #expect(spec.memory == "4G")
+        #expect(spec.image == "moat:base")
         #expect(spec.envFile == nil)
         #expect(skills(spec: spec).isEmpty)
         #expect(spec.command == ["claude", "--permission-mode", "auto", "--model", "opus"])
+    }
+
+    @Test
+    func usesOptionsImage() async throws {
+        let spec = try await prepare { $0.image = "moat:swift" }
+        #expect(spec.image == "moat:swift")
     }
 
     @Test
@@ -194,7 +201,7 @@ struct GuestVMTests {
             $0.memory = "8G"
         }
         #expect(spec.name == "moat.workspace.\(hash)")
-        #expect(spec.image == "moat:latest")
+        #expect(spec.image == "moat:base")
         #expect(spec.cpus == 4)
         #expect(spec.memory == "8G")
         #expect(spec.user == "robot")

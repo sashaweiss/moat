@@ -162,10 +162,11 @@ struct SessionManagerTests {
     func startUsesOptionsAndClaudeArguments() async throws {
         // The VM command prints the parts of the spec it's given.
         let sessionManager = sessionManager(startVM: { spec in
-            ["/bin/echo", spec.memory] + spec.command
+            ["/bin/echo", spec.image, spec.memory] + spec.command
         })
         var options = SessionOptions()
         options.memory = "8G"
+        options.image = "moat:swift"
         let session = try await start(
             sessionManager,
             options: options,
@@ -177,7 +178,7 @@ struct SessionManagerTests {
             outputBytes += chunk
         }
         let output = String(decoding: outputBytes, as: UTF8.self)
-        #expect(output.contains("8G claude"))
+        #expect(output.contains("moat:swift 8G claude"))
         #expect(output.contains("--resume"))
     }
 

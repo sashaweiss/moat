@@ -4,7 +4,6 @@ import Foundation
 public struct GuestVM: Sendable {
     public var environment: HostEnvironment
 
-    static let image = "moat:latest"
     static let user = "robot"
     static let vmHomeDirectory = "/home/robot"
 
@@ -243,7 +242,7 @@ public struct GuestVM: Sendable {
 
         return VMLaunchSpec(
             name: workspace.vmName,
-            image: Self.image,
+            image: options.image,
             cpus: options.cpus,
             memory: options.memory,
             user: Self.user,

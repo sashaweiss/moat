@@ -6,7 +6,7 @@ struct ContainerTests {
     func spec(envFile: URL? = nil) -> VMLaunchSpec {
         VMLaunchSpec(
             name: "moat.ws",
-            image: "moat:latest",
+            image: "moat:base",
             cpus: 2,
             memory: "4G",
             user: "robot",
@@ -73,7 +73,7 @@ struct ContainerTests {
             "/state:/home/robot/.claude:rw",
             "-v",
             "/ws/.git:/ws/.git:ro",
-            "moat:latest",
+            "moat:base",
             "claude",
             "--model",
             "opus",

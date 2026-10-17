@@ -5,7 +5,9 @@
 # }
 IDENTITY := release-identity.json
 
-.PHONY: all build test release
+CONTAINER := container
+
+.PHONY: all build test release image image-swift container-system
 
 all: build test
 
@@ -23,3 +25,15 @@ release:
 	swift run --package-path MoatRelease moat-release \
 		--signing-identity "$$identity" --notary-profile "$$profile" \
 		$(ARGS)
+
+# Image builds skip the cache, so they always get the latest Claude Code.
+image: container-system
+	$(CONTAINER) build --no-cache -t moat:base -f images/moat-base.Containerfile images
+
+image-swift: image
+	$(CONTAINER) build --no-cache -t moat:swift -f images/moat-swift.Containerfile images
+
+# Starts container's system if it isn't running. First start prompts to
+# download a kernel.
+container-system:
+	@$(CONTAINER) system status >/dev/null 2>&1 || $(CONTAINER) system start

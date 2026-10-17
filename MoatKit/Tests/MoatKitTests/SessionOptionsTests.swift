@@ -23,6 +23,7 @@ struct SessionOptionsTests {
             "cpus": 4,
             "envFile": "~/tokens.env",
             "gitAccessMode": "write",
+            "image": "moat:swift",
             "memory": "8G",
             "model": "sonnet",
             "noClaudeSettings": true,
@@ -34,6 +35,7 @@ struct SessionOptionsTests {
         #expect(options.cpus == 4)
         #expect(options.envFile == "~/tokens.env")
         #expect(options.gitAccessMode == .write)
+        #expect(options.image == "moat:swift")
         #expect(options.memory == "8G")
         #expect(options.model == "sonnet")
         #expect(options.noClaudeSettings == true)
@@ -51,6 +53,7 @@ struct SessionOptionsTests {
         #"{"gitAccessMode": "admin"}"#,
         #"{"cpus": "4"}"#,
         #"{"memory": 8}"#,
+        #"{"image": 1}"#,
     ])
     func invalid(json: String) throws {
         #expect(throws: DecodingError.self) {
