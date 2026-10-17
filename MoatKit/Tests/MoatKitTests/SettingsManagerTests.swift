@@ -49,11 +49,11 @@ struct SettingsManagerTests {
         try settingsManager.load()
         #expect(settingsManager.sessionOptions.model == "sonnet")
         #expect(
-            settingsManager.hostSettings.containerPath == "/opt/bin/container"
+            settingsManager.hostSettings.containerPath == "/opt/bin/container",
         )
         #expect(
             settingsManager.hostCommands.checkSystem
-                == ["/opt/bin/container", "system", "status"]
+                == ["/opt/bin/container", "system", "status"],
         )
         #expect(settingsManager.hostCommands.gitPath == "/opt/bin/git")
     }

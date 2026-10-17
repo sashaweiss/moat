@@ -126,7 +126,7 @@ public struct GuestVM: Sendable {
         let claudeSettingsFile = stateDirectory.appendingPathComponent("settings.json")
         if
             options.copyHostClaudeConfigs
-                || !fileManager.fileExists(atPath: claudeSettingsFile.path)
+            || !fileManager.fileExists(atPath: claudeSettingsFile.path)
         {
             var claudeSettings: [String: Any] = [:]
             let hostClaudeSettingsFile = claudeDirectory.appendingPathComponent("settings.json")

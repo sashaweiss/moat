@@ -1,11 +1,11 @@
 import Foundation
 import Subprocess
+@testable import MoatKit
 #if canImport(System)
 import System
 #else
 import SystemPackage
 #endif
-@testable import MoatKit
 
 /// The path in `error`, if it's `MoatError.invalidSettingsFile`.
 func invalidSettingsFilePath(_ error: MoatError?) -> String? {

@@ -29,11 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let alert = NSAlert(error: error)
             alert.messageText = "Moat couldn't read its settings."
             alert.informativeText = """
-                Fix or remove \(environment.settingsFile.path), then reopen \
-                Moat.
+            Fix or remove \(environment.settingsFile.path), then reopen \
+            Moat.
 
-                \(error)
-                """
+            \(error)
+            """
             alert.runModal()
             exit(1)
         }
@@ -83,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = "Quit \(ProcessInfo.processInfo.processName)?"
         alert.informativeText = """
         \(localRunningSessionNames.count) sessions will be stopped:
-        
+
         \(localRunningSessionNames.joined(separator: "\n"))
         """
         alert.addButton(withTitle: "Quit")

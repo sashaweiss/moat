@@ -74,7 +74,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
 
     // MARK: -
 
-    @objc private func addSession(_ sender: Any?) {
+    @objc
+    private func addSession(_ sender: Any?) {
         Task {
             await _addSession()
         }
@@ -219,9 +220,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         let alert = NSAlert()
         alert.messageText = "Remove session \"\(session.name)\"?"
         alert.informativeText = """
-            This permanently deletes Claude history and settings for \
-            "\(session.workspace.path)".
-            """
+        This permanently deletes Claude history and settings for \
+        "\(session.workspace.path)".
+        """
         alert.addButton(withTitle: "Remove").hasDestructiveAction = true
         alert.addButton(withTitle: "Cancel")
         let response = await alert.beginSheetModal(for: window)
