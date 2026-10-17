@@ -24,3 +24,18 @@ RUN cd /tmp \
     && ./swiftly init --assume-yes --no-modify-profile --quiet-shell-followup \
     && rm -f swiftly "swiftly-$(uname -m).tar.gz" \
     && swift --version
+
+# Install SwiftFormat from its prebuilt, statically-linked release binaries,
+# as robot, so Claude can install other versions without sudo.
+ARG SWIFTFORMAT_VERSION=0.64.0
+RUN cd /tmp \
+    && case "$(uname -m)" in \
+        x86_64) asset=swiftformat_linux ;; \
+        aarch64) asset=swiftformat_linux_aarch64 ;; \
+        *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSLO "https://github.com/nicklockwood/SwiftFormat/releases/download/$SWIFTFORMAT_VERSION/$asset.zip" \
+    && unzip -q "$asset.zip" \
+    && install -D -m 0755 "$asset" /home/robot/.local/bin/swiftformat \
+    && rm -f "$asset" "$asset.zip" \
+    && swiftformat --version
