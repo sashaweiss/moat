@@ -2,17 +2,22 @@ import Foundation
 import MoatKit
 import Observation
 
+/// A session recorded in `~/.moat/sessions`, with its latest status.
+struct SessionDetails {
+    let metadata: SessionMetadata
+    let status: SessionStatus
+}
+
+// MARK: -
+
 /// The sessions shown in the sidebar, and actions on them.
 @Observable
 final class SessionsModel {
-    /// The sessions recorded in `~/.moat/sessions`.
-    private(set) var sessions: [SessionMetadata] = []
+    /// The latest session details.
+    private(set) var sessionDetails: [SessionDetails] = []
 
     /// The workspace of the session selected in the sidebar.
     var selectedWorkspace: Workspace?
-
-    /// Each session's status, by workspace, as of `updateStatuses()`.
-    private(set) var statuses: [Workspace: SessionStatus] = [:]
 
     @ObservationIgnored
     private let settingsManager: SettingsManager
@@ -24,6 +29,8 @@ final class SessionsModel {
         self.sessionManager = sessionManager
     }
 
+    // MARK: -
+
     /// Migrates sessions from earlier versions of moat, so they're listed.
     func migratePointers() {
         do {
@@ -33,23 +40,58 @@ final class SessionsModel {
         }
     }
 
+    // MARK: -
+
+    /// A full `Session` for the given workspace, if we own one.
+    func localSession(workspace: Workspace) -> Session? {
+        return sessionManager.localSession(workspace: workspace)
+    }
+
+    /// The names of all sessions that are running and owned by us.
+    var localRunningSessionNames: [String] {
+        return sessionDetails
+            .filter { details in
+                guard
+                    let localSession = sessionManager.localSession(
+                        workspace: details.metadata.workspace,
+                    )
+                else {
+                    return false
+                }
+
+                switch localSession.state {
+                case .running:
+                    return true
+                case .stopping, .exited, .signaled, .failed:
+                    return false
+                }
+            }
+            .map(\.metadata.name)
+    }
+
+    // MARK: -
+
     /// Re-reads the sessions from `~/.moat/sessions`.
     func reloadSessions() {
         do {
-            sessions = try sessionManager.list()
-            Logger.info("Listed \(sessions.count) sessions")
+            sessionDetails = try sessionManager.list().map { metadata in
+                SessionDetails(
+                    metadata: metadata,
+                    status: sessionManager.status(metadata: metadata),
+                )
+            }
+            Logger.info("Listed \(sessionDetails.count) sessions")
         } catch {
             Logger.error("Couldn't list sessions: \(error)")
         }
     }
 
     /// Returns the status of the session for `workspace`.
-    func status(workspace: Workspace) -> SessionStatus {
-        statuses[workspace] ?? .stopped
+    func status(workspace: Workspace) -> SessionStatus? {
+        sessionDetails.first { $0.metadata.workspace == workspace }?.status
     }
 
-    /// Keeps `statuses` up to date until cancelled: updates them every
-    /// second, and refreshes which VMs are running every 5 seconds.
+    /// Regularly update session status.
     func updateStatuses() async {
         var seconds = 5
         while !Task.isCancelled {
@@ -66,7 +108,7 @@ final class SessionsModel {
 
     /// Refreshes which VMs are running (e.g., started by MoatCLI), and the
     /// statuses that depend on it.
-    func refreshRunningVMs() async {
+    private func refreshRunningVMs() async {
         do {
             try await sessionManager.refreshRunningVMs()
         } catch {
@@ -76,19 +118,16 @@ final class SessionsModel {
     }
 
     private func recomputeStatuses() {
-        var statuses: [Workspace: SessionStatus] = [:]
-        for session in sessions {
-            statuses[session.workspace] = sessionManager.status(
-                session: session,
+        sessionDetails = sessionDetails.map { details in
+            let metadata = details.metadata
+            return SessionDetails(
+                metadata: metadata,
+                status: sessionManager.status(metadata: metadata),
             )
         }
-        self.statuses = statuses
     }
 
-    /// Returns the session started for `workspace`, if there is one.
-    func session(workspace: Workspace) -> Session? {
-        sessionManager.session(workspace: workspace)
-    }
+    // MARK: -
 
     /// The options each start begins with, from `settings.json`.
     var defaultOptions: SessionOptions {
@@ -111,8 +150,13 @@ final class SessionsModel {
     /// Returns the name of the session for `workspace`, or the name a new one
     /// would get.
     func sessionName(workspace: Workspace) -> String {
-        sessions.first { $0.workspace == workspace }?.name ?? workspace.name
+        let details = sessionDetails.first { details in
+            details.metadata.workspace == workspace
+        }
+        return details?.metadata.name ?? workspace.name
     }
+
+    // MARK: -
 
     /// Selects the session for `workspace`, and starts it with `options`,
     /// unless it's already running.
@@ -166,6 +210,17 @@ final class SessionsModel {
         }
     }
 
+    // MARK: -
+
+    /// Stops every running session, and waits for them to exit.
+    func stopAll() async {
+        do {
+            try await sessionManager.stopAll()
+        } catch {
+            Logger.error("Couldn't stop every session: \(error)")
+        }
+    }
+
     /// Stops the session for `workspace`, if it's running.
     func stop(workspace: Workspace) {
         Task {
@@ -180,6 +235,8 @@ final class SessionsModel {
             Logger.error("Couldn't stop session for \(workspace): \(error)")
         }
     }
+
+    // MARK: -
 
     /// Removes the session for `session`, deleting everything moat has for
     /// it, including Claude's history.
@@ -203,29 +260,5 @@ final class SessionsModel {
             selectedWorkspace = nil
         }
         reloadSessions()
-    }
-
-    /// The names of the sessions that are running.
-    var runningSessionNames: [String] {
-        sessions
-            .filter { metadata in
-                let session = sessionManager.session(workspace: metadata.workspace)
-                switch session?.state {
-                case .running, .stopping:
-                    return true
-                case .exited, .signaled, .failed, nil:
-                    return false
-                }
-            }
-            .map(\.name)
-    }
-
-    /// Stops every running session, and waits for them to exit.
-    func stopAll() async {
-        do {
-            try await sessionManager.stopAll()
-        } catch {
-            Logger.error("Couldn't stop every session: \(error)")
-        }
     }
 }

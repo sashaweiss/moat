@@ -8,7 +8,7 @@ import SystemPackage
 #endif
 
 /// A session's status, as shown to the user.
-public enum SessionStatus: Equatable, Sendable {
+public enum SessionStatus: Hashable, Sendable {
     /// Not running.
     case stopped
     /// Running here, and the VM hasn't written to its terminal lately.
@@ -37,10 +37,21 @@ public final class SessionManager {
 
     /// The sessions started by this manager, keyed by their VMs' names. A
     /// session stays here after it exits, until it's started again.
-    public private(set) var sessions: [String: Session] = [:]
+    private var localSessions: [String: Session] = [:]
 
-    /// The names of the running VMs, as of `refreshRunningVMs()`.
-    private var runningVMNames: Set<String> = []
+    /// The running VMs, including those not started here (and which this
+    /// manager therefore has no session for), as of a point in time.
+    private struct RunningVMsSnapshot {
+        let names: Set<String>
+        /// When this snapshot was taken.
+        let date: Date
+    }
+
+    /// The running VMs, as of `refreshRunningVMs()`.
+    private var runningVMsSnapshot = RunningVMsSnapshot(
+        names: [],
+        date: .distantPast,
+    )
 
     /// How recently a session's VM must have written to its terminal for the
     /// session to be busy.
@@ -96,8 +107,8 @@ public final class SessionManager {
     }
 
     /// Returns this manager's session for `workspace`, if it has started one.
-    public func session(workspace: Workspace) -> Session? {
-        sessions[workspace.vmName]
+    public func localSession(workspace: Workspace) -> Session? {
+        localSessions[workspace.vmName]
     }
 
     /// Starts a session for `workspace` with `options` on a terminal of
@@ -115,7 +126,7 @@ public final class SessionManager {
             claudeArguments: claudeArguments,
             gitPath: commands.gitPath,
         )
-        if let existing = sessions[spec.name] {
+        if let existing = localSessions[spec.name] {
             switch existing.state {
             case .running, .stopping:
                 throw MoatError.sessionAlreadyRunning(workspace)
@@ -125,7 +136,7 @@ public final class SessionManager {
         }
 
         try await refreshRunningVMs()
-        guard !runningVMNames.contains(spec.name) else {
+        guard !runningVMsSnapshot.names.contains(spec.name) else {
             throw MoatError.sessionRunningElsewhere(workspace)
         }
 
@@ -136,14 +147,14 @@ public final class SessionManager {
             startCommand: commands.startVM(spec),
             size: size,
         )
-        sessions[spec.name] = session
+        localSessions[spec.name] = session
         return session
     }
 
     /// Stops the running session for `workspace`, and waits for it to exit.
     /// Does nothing if there isn't one.
     public func stop(workspace: Workspace) async throws {
-        guard let session = session(workspace: workspace) else {
+        guard let session = localSession(workspace: workspace) else {
             return
         }
         try await session.stop(command: commands.stopVM(session.spec))
@@ -154,7 +165,7 @@ public final class SessionManager {
     /// including Claude's history. Doesn't touch its workspace.
     public func remove(session metadata: SessionMetadata) async throws {
         try await refreshRunningVMs()
-        switch status(session: metadata) {
+        switch status(metadata: metadata) {
         case .stopped, .missing:
             break
         case .idle, .busy, .runningElsewhere:
@@ -175,12 +186,12 @@ public final class SessionManager {
         for file in sessionFiles {
             try FileManager.default.removeItem(at: file)
         }
-        sessions[metadata.workspace.vmName] = nil
+        localSessions[metadata.workspace.vmName] = nil
     }
 
     /// This manager's sessions that are running (or stopping).
     public var runningSessions: [Session] {
-        sessions.values.filter { session in
+        localSessions.values.filter { session in
             switch session.state {
             case .running, .stopping:
                 true
@@ -218,17 +229,17 @@ public final class SessionManager {
         }
     }
 
-    /// Returns the status of `session` at `date`. Whether a session started
-    /// elsewhere is running is as of `refreshRunningVMs()`.
+    /// Returns the latest-known status of the session with the given `metadata`
+    /// at `date`.
     public func status(
-        session metadata: SessionMetadata,
+        metadata: SessionMetadata,
         date: Date = Date(),
     ) -> SessionStatus {
         guard Filesystem.isDirectory(metadata.workspace.url) else {
             return .missing
         }
 
-        if let session = session(workspace: metadata.workspace) {
+        if let session = localSession(workspace: metadata.workspace) {
             switch session.state {
             case .running, .stopping:
                 if
@@ -240,27 +251,37 @@ public final class SessionManager {
 
                 return .idle
             case .exited, .signaled, .failed:
-                break
+                // VMs listed before the session exited include its own, so
+                // they don't show whether it's been started elsewhere since.
+                if
+                    let exitDate = session.exitDate,
+                    runningVMsSnapshot.date < exitDate
+                {
+                    return .stopped
+                }
             }
         }
 
-        if runningVMNames.contains(metadata.workspace.vmName) {
+        if runningVMsSnapshot.names.contains(metadata.workspace.vmName) {
             return .runningElsewhere
         }
 
         return .stopped
     }
 
-    /// Re-lists the running VMs, for `status(session:date:)`. If the tool's
+    /// Re-lists the running VMs, for `status(metadata:date:)`. If the tool's
     /// system isn't running, no VMs are.
     public func refreshRunningVMs() async throws {
+        // Taken before listing, so VMs that stop while listing count as
+        // running as of this date.
+        let date = Date()
         let check = try await Subprocess.run(
             .path(FilePath(commands.checkSystem[0])),
             arguments: Arguments(Array(commands.checkSystem.dropFirst())),
             output: .discarded,
         )
         guard check.terminationStatus.isSuccess else {
-            runningVMNames = []
+            runningVMsSnapshot = RunningVMsSnapshot(names: [], date: date)
             return
         }
 
@@ -276,11 +297,14 @@ public final class SessionManager {
             )
         }
 
-        runningVMNames = Set(
-            result.standardOutput
-                .split(separator: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty },
+        runningVMsSnapshot = RunningVMsSnapshot(
+            names: Set(
+                result.standardOutput
+                    .split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty },
+            ),
+            date: date,
         )
     }
 }

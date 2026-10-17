@@ -119,7 +119,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         model.selectedWorkspace = workspace
 
         switch model.status(workspace: workspace) {
-        case .stopped, .missing:
+        case nil, .stopped, .missing:
             break
         case .idle, .busy, .runningElsewhere:
             return

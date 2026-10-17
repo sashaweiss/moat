@@ -39,7 +39,7 @@ final class TerminalViewController: NSViewController, TerminalViewDelegate {
     /// Shows each session started for `workspace`, as it starts.
     private func showSessions() async {
         let sessions = Observations { @MainActor [model, workspace] in
-            model.session(workspace: workspace)
+            model.localSession(workspace: workspace)
         }
         for await session in sessions {
             guard let session, session !== self.session else {

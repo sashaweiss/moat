@@ -149,8 +149,7 @@ struct SessionManagerTests {
             startVM: { _ in ["/bin/sh", "-c", "echo started; read line"] },
         )
         let session = try await start(sessionManager)
-        #expect(sessionManager.sessions[session.spec.name] === session)
-        #expect(sessionManager.session(workspace: workspace) === session)
+        #expect(sessionManager.localSession(workspace: workspace) === session)
         try await waitForOutput("started", session: session)
 
         session.write(ArraySlice("\r".utf8))
@@ -232,7 +231,7 @@ struct SessionManagerTests {
 
         let second = try await start(sessionManager)
         #expect(second !== first)
-        #expect(sessionManager.session(workspace: workspace) === second)
+        #expect(sessionManager.localSession(workspace: workspace) === second)
         await second.waitForExit()
     }
 
@@ -329,7 +328,7 @@ struct SessionManagerTests {
     func statusIsStoppedWhenNothingRuns() async throws {
         let sessionManager = sessionManager()
         try await sessionManager.refreshRunningVMs()
-        #expect(sessionManager.status(session: metadata) == .stopped)
+        #expect(sessionManager.status(metadata: metadata) == .stopped)
     }
 
     @Test
@@ -338,7 +337,7 @@ struct SessionManagerTests {
             workspace: Workspace(folder: URL(fileURLWithPath: "/nonexistent")),
             name: "gone",
         )
-        #expect(sessionManager().status(session: missing) == .missing)
+        #expect(sessionManager().status(metadata: missing) == .missing)
     }
 
     @Test
@@ -347,7 +346,7 @@ struct SessionManagerTests {
             listRunningVMs: ["/bin/echo", "other-vm\n\(metadata.workspace.vmName)"],
         )
         try await sessionManager.refreshRunningVMs()
-        #expect(sessionManager.status(session: metadata) == .runningElsewhere)
+        #expect(sessionManager.status(metadata: metadata) == .runningElsewhere)
     }
 
     @Test
@@ -358,7 +357,7 @@ struct SessionManagerTests {
             listRunningVMs: ["/usr/bin/false"],
         )
         try await sessionManager.refreshRunningVMs()
-        #expect(sessionManager.status(session: metadata) == .stopped)
+        #expect(sessionManager.status(metadata: metadata) == .stopped)
     }
 
     @Test
@@ -391,13 +390,40 @@ struct SessionManagerTests {
         let session = try await start(sessionManager)
         try await waitForOutput("ready", session: session)
 
-        #expect(sessionManager.status(session: metadata) == .busy)
+        #expect(sessionManager.status(metadata: metadata) == .busy)
         let later = Date().addingTimeInterval(4)
-        #expect(sessionManager.status(session: metadata, date: later) == .idle)
+        #expect(sessionManager.status(metadata: metadata, date: later) == .idle)
 
         session.write(ArraySlice("\r".utf8))
         await session.waitForExit()
-        #expect(sessionManager.status(session: metadata) == .stopped)
+        #expect(sessionManager.status(metadata: metadata) == .stopped)
+    }
+
+    @Test
+    func statusIsStoppedAfterExitUntilVMsAreListedAgain() async throws {
+        // Lists the VMs named in a file; at first, none.
+        let listFile = fixture.root.appendingPathComponent("running-vms")
+        let sessionManager = sessionManager(
+            startVM: { _ in ["/bin/sh", "-c", "echo ready; read line"] },
+            listRunningVMs: [
+                "/bin/sh",
+                "-c",
+                "cat '\(listFile.path)' 2>/dev/null; true",
+            ],
+        )
+        let session = try await start(sessionManager)
+        try await waitForOutput("ready", session: session)
+
+        // Listed while it runs, the session's VM is its own.
+        try fixture.write(workspace.vmName, path: listFile.lastPathComponent)
+        try await sessionManager.refreshRunningVMs()
+        session.write(ArraySlice("\r".utf8))
+        await session.waitForExit()
+        #expect(sessionManager.status(metadata: metadata) == .stopped)
+
+        // Listed after it exits, the VM must have been started elsewhere.
+        try await sessionManager.refreshRunningVMs()
+        #expect(sessionManager.status(metadata: metadata) == .runningElsewhere)
     }
 
     @Test
@@ -408,7 +434,7 @@ struct SessionManagerTests {
         await #expect(throws: MoatError.sessionRunningElsewhere(workspace)) {
             try await start(sessionManager)
         }
-        #expect(sessionManager.session(workspace: workspace) == nil)
+        #expect(sessionManager.localSession(workspace: workspace) == nil)
     }
 
     @Test
@@ -425,7 +451,7 @@ struct SessionManagerTests {
             .contentsOfDirectory(atPath: sessions.path)
         #expect(!remaining.contains { $0.hasPrefix(hash) })
         #expect(try sessionManager.list() == [other])
-        #expect(sessionManager.session(workspace: workspace) == nil)
+        #expect(sessionManager.localSession(workspace: workspace) == nil)
         #expect(Filesystem.isDirectory(fixture.workspace))
     }
 

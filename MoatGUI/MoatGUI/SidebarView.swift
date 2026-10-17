@@ -11,26 +11,27 @@ struct SidebarView: View {
 
     var body: some View {
         List(
-            model.sessions,
-            id: \.workspace,
+            model.sessionDetails,
+            id: \.metadata.workspace,
             selection: $model.selectedWorkspace,
-        ) { session in
-            let status = model.status(workspace: session.workspace)
-            SessionRow(session: session, status: status)
+        ) { details in
+            let metadata = details.metadata
+            let status = details.status
+            SessionRow(metadata: metadata, status: status)
                 // Disable "type to select".
                 .typeSelectEquivalent("")
                 .contextMenu {
                     Button("Start…") {
-                        startSession(session.workspace)
+                        startSession(metadata.workspace)
                     }
                     .disabled(!canStart(status: status))
                     Button("Stop") {
-                        model.stop(workspace: session.workspace)
+                        model.stop(workspace: metadata.workspace)
                     }
                     .disabled(!canStop(status: status))
                     Divider()
                     Button("Remove…") {
-                        removeSession(session)
+                        removeSession(metadata)
                     }
                     .disabled(!canRemove(status: status))
                 }
@@ -69,7 +70,7 @@ struct SidebarView: View {
 /// A session's status badge and name, with its workspace beneath. Sessions
 /// that can't be used here are dimmed, and say why.
 private struct SessionRow: View {
-    let session: SessionMetadata
+    let metadata: SessionMetadata
     let status: SessionStatus
 
     var body: some View {
@@ -78,7 +79,7 @@ private struct SessionRow: View {
                 .fill(badgeColor)
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading) {
-                Text(session.name)
+                Text(metadata.name)
                 Text(caption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -108,11 +109,11 @@ private struct SessionRow: View {
     private var caption: String {
         switch status {
         case .stopped, .idle, .busy:
-            session.workspace.path
+            metadata.workspace.path
         case .runningElsewhere:
-            "Running elsewhere: \(session.workspace)"
+            "Running elsewhere: \(metadata.workspace)"
         case .missing:
-            "Missing: \(session.workspace)"
+            "Missing: \(metadata.workspace)"
         }
     }
 

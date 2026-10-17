@@ -3,7 +3,11 @@ import MoatKit
 
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let sessionManager: SessionManager
+    private let settingsManager: SettingsManager
+
     private let sessionsModel: SessionsModel
+
     private var mainWindowController: MainWindowController?
 
     static func main() {
@@ -17,9 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         let environment = HostEnvironment()
-        let settingsManager: SettingsManager
+
         do {
-            settingsManager = try SettingsManager.load(environment: environment)
+            self.settingsManager = try SettingsManager.load(environment: environment)
         } catch {
             Logger.error("Couldn't load settings: \(error)")
             let alert = NSAlert(error: error)
@@ -33,13 +37,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
             exit(1)
         }
-        sessionsModel = SessionsModel(
+        self.sessionManager = SessionManager(
+            environment: environment,
             settingsManager: settingsManager,
-            sessionManager: SessionManager(
-                environment: environment,
-                settingsManager: settingsManager,
-            ),
         )
+        self.sessionsModel = SessionsModel(
+            settingsManager: settingsManager,
+            sessionManager: sessionManager,
+        )
+
         super.init()
     }
 
@@ -59,12 +65,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.activate()
     }
 
-    func applicationDidBecomeActive(_ notification: Notification) {
-        Task {
-            await sessionsModel.refreshRunningVMs()
-        }
-    }
-
     func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication,
     ) -> Bool {
@@ -74,17 +74,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(
         _ sender: NSApplication,
     ) -> NSApplication.TerminateReply {
-        let runningSessionNames = sessionsModel.runningSessionNames
-        if runningSessionNames.isEmpty {
+        let localRunningSessionNames = sessionsModel.localRunningSessionNames
+        if localRunningSessionNames.isEmpty {
             return .terminateNow
         }
 
         let alert = NSAlert()
         alert.messageText = "Quit \(ProcessInfo.processInfo.processName)?"
         alert.informativeText = """
-        \(runningSessionNames.count) sessions will be stopped:
+        \(localRunningSessionNames.count) sessions will be stopped:
         
-        \(runningSessionNames.joined(separator: "\n"))
+        \(localRunningSessionNames.joined(separator: "\n"))
         """
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")

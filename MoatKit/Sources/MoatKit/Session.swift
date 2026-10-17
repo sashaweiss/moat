@@ -53,6 +53,9 @@ public final class Session {
     public let spec: VMLaunchSpec
     public private(set) var state: State = .running
 
+    /// When the VM exited, once it has.
+    public private(set) var exitDate: Date?
+
     /// Bytes the VM writes to the terminal. Finishes once the VM exits and its output is drained.
     /// Supports a single consumer.
     public nonisolated let outputStream: AsyncThrowingStream<ArraySlice<UInt8>, Error>
@@ -203,7 +206,7 @@ public final class Session {
     // MARK: -
 
     /// Starts `vmTask`, which runs the VM via `runVM(...)` and sets `state`
-    /// once it exits.
+    /// and `exitDate` once it exits.
     private func start(
         checkSystemCommand: [String],
         startSystemCommand: [String],
@@ -219,6 +222,7 @@ public final class Session {
                 startCommand: startCommand,
                 child: child,
             )
+            exitDate = Date()
         }
     }
 
