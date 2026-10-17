@@ -71,21 +71,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Confirms quitting, then stops every running session before quitting.
     func applicationShouldTerminate(
         _ sender: NSApplication,
     ) -> NSApplication.TerminateReply {
-        let alert = NSAlert()
-        alert.messageText = "Quit \(ProcessInfo.processInfo.processName)?"
         let runningSessionNames = sessionsModel.runningSessionNames
         if runningSessionNames.isEmpty {
-            alert.informativeText = "No sessions are running."
-        } else {
-            alert.informativeText = """
-            These sessions will be stopped:
-            \(runningSessionNames.joined(separator: "\n"))
-            """
+            return .terminateNow
         }
+
+        let alert = NSAlert()
+        alert.messageText = "Quit \(ProcessInfo.processInfo.processName)?"
+        alert.informativeText = """
+        \(runningSessionNames.count) sessions will be stopped:
+        
+        \(runningSessionNames.joined(separator: "\n"))
+        """
         alert.addButton(withTitle: "Quit")
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
@@ -102,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    /// The app, Edit, and Window menus.
+    /// The Moat, Edit, and Window menus.
     private func makeMainMenu() -> NSMenu {
         let appName = ProcessInfo.processInfo.processName
 
