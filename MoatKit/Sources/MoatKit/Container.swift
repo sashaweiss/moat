@@ -12,6 +12,7 @@ public enum Container {
             startVM: { spec in startCommand(spec: spec, executable: executable) },
             stopVM: { spec in stopCommand(spec: spec, executable: executable) },
             listRunningVMs: [executable, "list", "--quiet"],
+            listImages: [executable, "image", "list", "--format", "json"],
             gitPath: settings.gitPath,
         )
     }

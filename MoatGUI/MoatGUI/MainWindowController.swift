@@ -140,6 +140,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
             return nil
         }
 
+        let images = await model.moatImages()
         var options: SessionOptions?
         let sheet = NSWindow()
         sheet.contentViewController = NSHostingController(
@@ -148,6 +149,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
                 workspace: workspace,
                 options: model.defaultOptions,
                 hostSkills: model.hostSkills(),
+                images: images,
                 chooseEnvFile: { [weak sheet] in
                     guard let sheet else {
                         return nil

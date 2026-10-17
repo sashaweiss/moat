@@ -1,11 +1,6 @@
 import Foundation
 import Observation
 import Subprocess
-#if canImport(System)
-import System
-#else
-import SystemPackage
-#endif
 
 /// A session's status, as shown to the user.
 public enum SessionStatus: Hashable, Sendable {
@@ -269,25 +264,27 @@ public final class SessionManager {
         return .stopped
     }
 
+    /// Whether the tool's system, which runs VMs, is running.
+    private func isSystemRunning() async throws -> Bool {
+        try await Subprocess.run(
+            .moatCommand(commands.checkSystem),
+            output: .discarded,
+        ).terminationStatus.isSuccess
+    }
+
     /// Re-lists the running VMs, for `status(metadata:date:)`. If the tool's
     /// system isn't running, no VMs are.
     public func refreshRunningVMs() async throws {
         // Taken before listing, so VMs that stop while listing count as
         // running as of this date.
         let date = Date()
-        let check = try await Subprocess.run(
-            .path(FilePath(commands.checkSystem[0])),
-            arguments: Arguments(Array(commands.checkSystem.dropFirst())),
-            output: .discarded,
-        )
-        guard check.terminationStatus.isSuccess else {
+        guard try await isSystemRunning() else {
             runningVMsSnapshot = RunningVMsSnapshot(names: [], date: date)
             return
         }
 
         let result = try await Subprocess.run(
-            .path(FilePath(commands.listRunningVMs[0])),
-            arguments: Arguments(Array(commands.listRunningVMs.dropFirst())),
+            .moatCommand(commands.listRunningVMs),
             output: .string(limit: 1 << 20),
         )
         guard result.terminationStatus.isSuccess else {
@@ -306,5 +303,42 @@ public final class SessionManager {
             ),
             date: date,
         )
+    }
+
+    /// An image, as `listImages` prints it.
+    private struct ListedImage: Decodable {
+        struct Configuration: Decodable {
+            let name: String
+        }
+
+        let configuration: Configuration
+    }
+
+    /// Returns the names of moat's images (those in the `moat` repository,
+    /// like `moat:base`), sorted. If the tool's system isn't running, there
+    /// are none.
+    public func moatImages() async throws -> [String] {
+        guard try await isSystemRunning() else {
+            return []
+        }
+
+        let result = try await Subprocess.run(
+            .moatCommand(commands.listImages),
+            output: .data(limit: 1 << 24),
+        )
+        guard result.terminationStatus.isSuccess else {
+            throw MoatError.commandFailed(
+                commands.listImages,
+                status: result.terminationStatus,
+            )
+        }
+
+        return try JSONDecoder()
+            .decode([ListedImage].self, from: result.standardOutput)
+            .map(\.configuration.name)
+            .filter { $0.hasPrefix("moat:") }
+            .sorted { first, second in
+                first.localizedStandardCompare(second) == .orderedAscending
+            }
     }
 }

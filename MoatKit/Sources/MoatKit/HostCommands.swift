@@ -12,6 +12,9 @@ public struct HostCommands: Sendable {
     public var stopVM: @Sendable (VMLaunchSpec) -> [String]
     /// Prints the names of the running VMs, one per line.
     public var listRunningVMs: [String]
+    /// Prints the images as a JSON array of objects, each with its name at
+    /// `configuration.name`.
+    public var listImages: [String]
 
     /// Path to a `git` executable.
     public var gitPath: String
@@ -22,6 +25,7 @@ public struct HostCommands: Sendable {
         startVM: @escaping @Sendable (VMLaunchSpec) -> [String],
         stopVM: @escaping @Sendable (VMLaunchSpec) -> [String],
         listRunningVMs: [String],
+        listImages: [String],
         gitPath: String,
     ) {
         self.checkSystem = checkSystem
@@ -29,6 +33,7 @@ public struct HostCommands: Sendable {
         self.startVM = startVM
         self.stopVM = stopVM
         self.listRunningVMs = listRunningVMs
+        self.listImages = listImages
         self.gitPath = gitPath
     }
 }

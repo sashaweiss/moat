@@ -10,15 +10,14 @@ struct SessionManagerTests {
         fixture = try Fixture()
     }
 
-    /// A manager whose sessions run `startVM` and `stopVM` as their VM commands,
-    /// with `checkSystem` and `startSystem` for the system, and
-    /// `listRunningVMs` to list running VMs (by default, none).
+    /// A manager using the given commands.
     func sessionManager(
         checkSystem: [String] = ["/usr/bin/true"],
         startSystem: [String] = ["/usr/bin/false"],
         startVM: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/true"] },
         stopVM: @escaping @Sendable (VMLaunchSpec) -> [String] = { _ in ["/usr/bin/false"] },
         listRunningVMs: [String] = ["/usr/bin/true"],
+        listImages: [String] = ["/bin/echo", "[]"],
     ) -> SessionManager {
         let settingsManager = SettingsManager(
             environment: fixture.environment,
@@ -28,6 +27,7 @@ struct SessionManagerTests {
                 startVM: startVM,
                 stopVM: stopVM,
                 listRunningVMs: listRunningVMs,
+                listImages: listImages,
                 gitPath: "/usr/bin/git",
             ),
         )
@@ -365,6 +365,39 @@ struct SessionManagerTests {
         let sessionManager = sessionManager(listRunningVMs: ["/usr/bin/false"])
         await #expect(throws: MoatError.self) {
             try await sessionManager.refreshRunningVMs()
+        }
+    }
+
+    @Test
+    func moatImagesAreSortedAndFiltered() async throws {
+        let json = """
+        [
+            {"configuration": {"name": "moat:swift"}, "id": "a"},
+            {"configuration": {"name": "docker.io/library/debian:bookworm"}},
+            {"configuration": {"name": "moat:base"}, "variants": []}
+        ]
+        """
+        let sessionManager = sessionManager(listImages: ["/bin/echo", json])
+        #expect(
+            try await sessionManager.moatImages() == ["moat:base", "moat:swift"],
+        )
+    }
+
+    @Test
+    func noImagesWhenSystemIsStopped() async throws {
+        // Listing would fail, but isn't attempted.
+        let sessionManager = sessionManager(
+            checkSystem: ["/usr/bin/false"],
+            listImages: ["/usr/bin/false"],
+        )
+        #expect(try await sessionManager.moatImages() == [])
+    }
+
+    @Test
+    func moatImagesFailsIfListingFails() async throws {
+        let sessionManager = sessionManager(listImages: ["/usr/bin/false"])
+        await #expect(throws: MoatError.self) {
+            try await sessionManager.moatImages()
         }
     }
 

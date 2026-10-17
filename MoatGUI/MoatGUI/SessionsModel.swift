@@ -147,6 +147,16 @@ final class SessionsModel {
         }
     }
 
+    /// Returns the names of moat's images, like `moat:base`.
+    func moatImages() async -> [String] {
+        do {
+            return try await sessionManager.moatImages()
+        } catch {
+            Logger.warn("Couldn't list moat's images: \(error)")
+            return []
+        }
+    }
+
     /// Returns the name of the session for `workspace`, or the name a new one
     /// would get.
     func sessionName(workspace: Workspace) -> String {

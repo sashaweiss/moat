@@ -29,6 +29,8 @@ struct StartSessionOptionsView: View {
     let workspace: Workspace
     /// The skills in the host's `~/.claude/skills`, which every session gets.
     let hostSkills: [String]
+    /// Available VM images.
+    let images: [String]
     /// Asks for an environment file, returning its path, or nil if the user
     /// cancels.
     let chooseEnvFile: () async -> String?
@@ -47,6 +49,7 @@ struct StartSessionOptionsView: View {
         workspace: Workspace,
         options: SessionOptions,
         hostSkills: [String],
+        images: [String],
         chooseEnvFile: @escaping () async -> String?,
         chooseSkills: @escaping () async -> [String],
         finish: @escaping (SessionOptions?) -> Void,
@@ -54,6 +57,7 @@ struct StartSessionOptionsView: View {
         self.name = name
         self.workspace = workspace
         self.hostSkills = hostSkills
+        self.images = images
         self.chooseEnvFile = chooseEnvFile
         self.chooseSkills = chooseSkills
         self.finish = finish
@@ -318,6 +322,9 @@ struct StartSessionOptionsView: View {
 
     private var advancedOptions: some View {
         Grid(alignment: .leading, verticalSpacing: 12) {
+            optionRow(title: "Image:") {
+                imageField
+            }
             optionRow(title: "Model:") {
                 TextField("Model", text: $options.model)
                     .labelsHidden()
@@ -367,6 +374,26 @@ struct StartSessionOptionsView: View {
                 )
                 .labelsHidden()
             }
+        }
+    }
+
+    private var imageField: some View {
+        Picker("Image", selection: $options.image) {
+            ForEach(imageChoices, id: \.self) { image in
+                Text(image).tag(image)
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    /// The images to offer, including the default from `settings.json` if
+    /// it isn't one of `images`.
+    private var imageChoices: [String] {
+        if images.contains(options.image) {
+            images
+        } else {
+            images + [options.image]
         }
     }
 

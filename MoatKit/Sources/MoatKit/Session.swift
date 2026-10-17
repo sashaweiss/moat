@@ -173,8 +173,7 @@ public final class Session {
 
         do {
             let result = try await Subprocess.run(
-                .path(FilePath(command[0])),
-                arguments: Arguments(Array(command.dropFirst())),
+                .moatCommand(command),
                 output: .discarded,
             )
 
@@ -256,9 +255,10 @@ public final class Session {
         platformOptions.createSession = true
         do {
             let result = try await Subprocess.run(
-                .path(FilePath(startCommand[0])),
-                arguments: Arguments(Array(startCommand.dropFirst())),
-                platformOptions: platformOptions,
+                .moatCommand(
+                    startCommand,
+                    platformOptions: platformOptions,
+                ),
                 // We want our copy closed after the process is spawned and has
                 // its own copy, since otherwise it'll keep the pseudo-terminal
                 // open after the VM process exits.
@@ -294,8 +294,7 @@ public final class Session {
         stdio: FileDescriptor,
     ) async throws {
         let check = try await Subprocess.run(
-            .path(FilePath(checkSystemCommand[0])),
-            arguments: Arguments(Array(checkSystemCommand.dropFirst())),
+            .moatCommand(checkSystemCommand),
             output: .discarded,
         )
         if check.terminationStatus.isSuccess {
@@ -303,8 +302,7 @@ public final class Session {
         }
 
         let start = try await Subprocess.run(
-            .path(FilePath(startSystemCommand[0])),
-            arguments: Arguments(Array(startSystemCommand.dropFirst())),
+            .moatCommand(startSystemCommand),
             input: .fileDescriptor(stdio, closeAfterSpawningProcess: false),
             output: .fileDescriptor(stdio, closeAfterSpawningProcess: false),
             error: .fileDescriptor(stdio, closeAfterSpawningProcess: false),

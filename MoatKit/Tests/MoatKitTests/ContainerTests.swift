@@ -45,6 +45,10 @@ struct ContainerTests {
         )
         #expect(commands.stopVM(spec()) == ["/bin/container", "stop", "moat.ws"])
         #expect(commands.listRunningVMs == ["/bin/container", "list", "--quiet"])
+        #expect(
+            commands.listImages
+                == ["/bin/container", "image", "list", "--format", "json"],
+        )
         #expect(commands.gitPath == "/opt/bin/git")
     }
 
