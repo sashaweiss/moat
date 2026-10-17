@@ -390,7 +390,7 @@ struct GuestVMTests {
     @Test
     func doesNotCopyClaudeSettingsWhenDisabled() async throws {
         try fixture.write(#"{"theme": "dark"}"#, path: ".claude/settings.json", base: fixture.home)
-        _ = try await prepare { $0.noClaudeSettings = true }
+        _ = try await prepare { $0.copyHostClaudeConfigs = false }
         let settings = try fixture.readJSON(claudeSettingsFile)
         #expect(settings == ["autoMemoryDirectory": "~/.claude/memory"])
     }
@@ -398,13 +398,13 @@ struct GuestVMTests {
     @Test
     func keepsSessionClaudeSettingsWhenNotCopying() async throws {
         try fixture.write(#"{"theme": "dark"}"#, path: ".claude/settings.json", base: fixture.home)
-        _ = try await prepare { $0.noClaudeSettings = true }
+        _ = try await prepare { $0.copyHostClaudeConfigs = false }
         try fixture.write(
             #"{"theme": "changed in the VM"}"#,
             path: "\(hash)/settings.json",
             base: sessions,
         )
-        _ = try await prepare { $0.noClaudeSettings = true }
+        _ = try await prepare { $0.copyHostClaudeConfigs = false }
         let settings = try fixture.readJSON(claudeSettingsFile)
         #expect(settings == ["theme": "changed in the VM"])
     }
@@ -436,6 +436,14 @@ struct GuestVMTests {
         try fixture.write("host instructions", path: ".claude/CLAUDE.md", base: fixture.home)
         _ = try await prepare()
         #expect(try fixture.read(claudeMD) == prologue + "\n\nhost instructions")
+    }
+
+    @Test
+    func claudeMDIsOnlyThePrologueWhenNotCopying() async throws {
+        try fixture.write("host instructions", path: ".claude/CLAUDE.md", base: fixture.home)
+        _ = try await prepare { $0.copyHostClaudeConfigs = false }
+        let claudeMD = sessions.appendingPathComponent("\(hash).CLAUDE.md")
+        #expect(try fixture.read(claudeMD) == claudePrologue)
     }
 
     @Test

@@ -66,8 +66,11 @@ struct MoatCommand: AsyncParsableCommand {
     @Option(help: "image to run in the VM (default: moat:base)")
     var image: String?
 
-    @Flag(help: "don't overwrite the session's Claude settings with the host's ~/.claude/settings.json")
-    var noClaudeSettings = false
+    @Flag(
+        inversion: .prefixedNo,
+        help: "copy the host's ~/.claude/settings.json and CLAUDE.md into the session (default: true)",
+    )
+    var copyHostClaudeConfigs: Bool?
 
     @Argument(parsing: .allUnrecognized, help: .hidden)
     var claudeArguments: [String] = []
@@ -210,8 +213,8 @@ struct MoatCommand: AsyncParsableCommand {
         if let image {
             options.image = image
         }
-        if noClaudeSettings {
-            options.noClaudeSettings = true
+        if let copyHostClaudeConfigs {
+            options.copyHostClaudeConfigs = copyHostClaudeConfigs
         }
         return options
     }

@@ -360,15 +360,10 @@ struct StartSessionOptionsView: View {
                 .labelsHidden()
                 .frame(width: 80)
             }
-            optionRow(title: "Copy host Claude settings?") {
+            optionRow(title: "Use host's Claude configs?") {
                 Toggle(
-                    "Copy host Claude settings?",
-                    isOn: Binding(
-                        get: { !options.noClaudeSettings },
-                        set: { isOn in
-                            options.noClaudeSettings = !isOn
-                        },
-                    ),
+                    "Use host's Claude configs?",
+                    isOn: $options.copyHostClaudeConfigs,
                 )
                 .labelsHidden()
             }

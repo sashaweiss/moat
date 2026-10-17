@@ -121,18 +121,17 @@ public struct GuestVM: Sendable {
         }
 
         // Write a settings.json into the state directory, which is mounted at
-        // ~/.claude. When "copy host Claude settings" is enabled we overwrite
+        // ~/.claude. When copying the host's Claude configs we overwrite
         // on start; otherwise, only written if not yet existing.
         let claudeSettingsFile = stateDirectory.appendingPathComponent("settings.json")
-        let copiesHostClaudeSettings = !options.noClaudeSettings
         if
-            copiesHostClaudeSettings
+            options.copyHostClaudeConfigs
                 || !fileManager.fileExists(atPath: claudeSettingsFile.path)
         {
             var claudeSettings: [String: Any] = [:]
             let hostClaudeSettingsFile = claudeDirectory.appendingPathComponent("settings.json")
             if
-                copiesHostClaudeSettings,
+                options.copyHostClaudeConfigs,
                 fileManager.fileExists(atPath: hostClaudeSettingsFile.path)
             {
                 let data = try Data(contentsOf: hostClaudeSettingsFile)
@@ -161,10 +160,10 @@ public struct GuestVM: Sendable {
 
         // Populate the VM's CLAUDE.md with a prefix describing the moat
         // environment, followed by the contents of the host's
-        // ~/.claude/CLAUDE.md.
+        // ~/.claude/CLAUDE.md when copying the host's Claude configs.
         var claudeMD = claudePrologue
         let hostClaudeMDFile = claudeDirectory.appendingPathComponent("CLAUDE.md")
-        if Filesystem.isFile(hostClaudeMDFile) {
+        if options.copyHostClaudeConfigs, Filesystem.isFile(hostClaudeMDFile) {
             claudeMD += "\n\n" + (try String(contentsOf: hostClaudeMDFile, encoding: .utf8))
         }
         let claudeMDFile = sessionsDirectory.appendingPathComponent("\(workspaceHash).CLAUDE.md")

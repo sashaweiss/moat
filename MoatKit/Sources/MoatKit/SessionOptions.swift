@@ -25,8 +25,8 @@ public struct SessionOptions: Equatable, Codable, Sendable {
     /// Skill directories to mount into the VM, in addition to the host's
     /// `~/.claude/skills`.
     public var addSkills: [String] = []
-    /// Whether to skip copying the host's Claude settings into the session.
-    public var noClaudeSettings: Bool = false
+    /// Whether to copy the host's Claude configs into sessions on start.
+    public var copyHostClaudeConfigs: Bool = true
 
     public init() {}
 
@@ -57,8 +57,8 @@ public struct SessionOptions: Equatable, Codable, Sendable {
         addSkills = try container
             .decodeIfPresent([String].self, forKey: .addSkills)
             ?? addSkills
-        noClaudeSettings = try container
-            .decodeIfPresent(Bool.self, forKey: .noClaudeSettings)
-            ?? noClaudeSettings
+        copyHostClaudeConfigs = try container
+            .decodeIfPresent(Bool.self, forKey: .copyHostClaudeConfigs)
+            ?? copyHostClaudeConfigs
     }
 }

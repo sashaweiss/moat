@@ -26,7 +26,7 @@ struct SessionOptionsTests {
             "image": "moat:swift",
             "memory": "8G",
             "model": "sonnet",
-            "noClaudeSettings": true,
+            "copyHostClaudeConfigs": false,
             "permissionMode": "plan",
             "someFutureKey": 42
         }
@@ -38,7 +38,7 @@ struct SessionOptionsTests {
         #expect(options.image == "moat:swift")
         #expect(options.memory == "8G")
         #expect(options.model == "sonnet")
-        #expect(options.noClaudeSettings == true)
+        #expect(options.copyHostClaudeConfigs == false)
         #expect(options.permissionMode == "plan")
     }
 
@@ -46,8 +46,8 @@ struct SessionOptionsTests {
         "{",
         "[]",
         #"{"model": 3}"#,
-        #"{"noClaudeSettings": 1}"#,
-        #"{"noClaudeSettings": "yes"}"#,
+        #"{"copyHostClaudeConfigs": 1}"#,
+        #"{"copyHostClaudeConfigs": "yes"}"#,
         #"{"addSkills": "~/a"}"#,
         #"{"addSkills": ["~/a", 2]}"#,
         #"{"gitAccessMode": "admin"}"#,
