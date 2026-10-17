@@ -280,11 +280,9 @@ struct GuestVMTests {
             base: fixture.home,
         )
         let claudeJSON = try fixture.write("{}", path: "\(hash).claude.json", base: sessions)
-        let settings = try fixture.write("{}", path: "\(hash)/settings.json", base: sessions)
         _ = try await prepare()
         #expect(try fixture.read(credentials) == "secret")
         #expect(try fixture.read(claudeJSON) == "{}")
-        #expect(try fixture.read(settings) == "{}")
     }
 
     @Test
@@ -360,7 +358,7 @@ struct GuestVMTests {
     }
 
     @Test
-    func seedsClaudeSettingsFromHost() async throws {
+    func copiesClaudeSettingsFromHost() async throws {
         try fixture.write(
             #"{"theme": "dark", "nested": {"a": [1, true]}}"#,
             path: ".claude/settings.json",
@@ -374,11 +372,41 @@ struct GuestVMTests {
     }
 
     @Test
-    func doesNotSeedClaudeSettingsWhenDisabled() async throws {
+    func copyingClaudeSettingsOverwritesThemOnEveryStart() async throws {
+        try fixture.write(#"{"theme": "dark"}"#, path: ".claude/settings.json", base: fixture.home)
+        _ = try await prepare()
+        try fixture.write(
+            #"{"theme": "changed in the VM"}"#,
+            path: "\(hash)/settings.json",
+            base: sessions,
+        )
+        try fixture.write(#"{"theme": "light"}"#, path: ".claude/settings.json", base: fixture.home)
+        _ = try await prepare()
+        let settings = try fixture.readJSON(claudeSettingsFile)
+        #expect(settings["theme"] as? String == "light")
+        #expect(settings["autoMemoryDirectory"] as? String == "~/.claude/memory")
+    }
+
+    @Test
+    func doesNotCopyClaudeSettingsWhenDisabled() async throws {
         try fixture.write(#"{"theme": "dark"}"#, path: ".claude/settings.json", base: fixture.home)
         _ = try await prepare { $0.noClaudeSettings = true }
         let settings = try fixture.readJSON(claudeSettingsFile)
         #expect(settings == ["autoMemoryDirectory": "~/.claude/memory"])
+    }
+
+    @Test
+    func keepsSessionClaudeSettingsWhenNotCopying() async throws {
+        try fixture.write(#"{"theme": "dark"}"#, path: ".claude/settings.json", base: fixture.home)
+        _ = try await prepare { $0.noClaudeSettings = true }
+        try fixture.write(
+            #"{"theme": "changed in the VM"}"#,
+            path: "\(hash)/settings.json",
+            base: sessions,
+        )
+        _ = try await prepare { $0.noClaudeSettings = true }
+        let settings = try fixture.readJSON(claudeSettingsFile)
+        #expect(settings == ["theme": "changed in the VM"])
     }
 
     @Test

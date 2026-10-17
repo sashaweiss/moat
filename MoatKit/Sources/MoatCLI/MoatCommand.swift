@@ -66,7 +66,7 @@ struct MoatCommand: AsyncParsableCommand {
     @Option(help: "image to run in the VM (default: moat:base)")
     var image: String?
 
-    @Flag(help: "don't seed new sessions with the host's ~/.claude/settings.json")
+    @Flag(help: "don't overwrite the session's Claude settings with the host's ~/.claude/settings.json")
     var noClaudeSettings = false
 
     @Argument(parsing: .allUnrecognized, help: .hidden)

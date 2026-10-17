@@ -25,8 +25,7 @@ public struct SessionOptions: Equatable, Codable, Sendable {
     /// Skill directories to mount into the VM, in addition to the host's
     /// `~/.claude/skills`.
     public var addSkills: [String] = []
-    /// Whether to skip seeding new sessions with the host's
-    /// `~/.claude/settings.json`.
+    /// Whether to skip copying the host's Claude settings into the session.
     public var noClaudeSettings: Bool = false
 
     public init() {}

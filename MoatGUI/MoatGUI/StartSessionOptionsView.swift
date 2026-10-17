@@ -21,7 +21,7 @@ struct StartSessionOptionsView: View {
         "bypassPermissions",
     ]
 
-    private static let labelWidth: CGFloat = 120
+    private static let labelWidth: CGFloat = 175
     private static let skillsVisibleRows = 3
     private static let skillsRowHeight: CGFloat = 24
 
@@ -144,16 +144,16 @@ struct StartSessionOptionsView: View {
 
     private var generalOptions: some View {
         Grid(alignment: .leading, verticalSpacing: 12) {
-            optionRow(title: "Git access") {
+            optionRow(title: "Git access:") {
                 gitAccessField
             }
-            optionRow(title: "Environment file") {
+            optionRow(title: "Environment file:") {
                 envFileField
             }
-            optionRow(title: "Extra skills", alignment: .top) {
+            optionRow(title: "Extra skills:", alignment: .top) {
                 skillsField
             }
-            optionRow(title: "Permission mode") {
+            optionRow(title: "Permission mode:") {
                 permissionModeField
             }
         }
@@ -183,6 +183,13 @@ struct StartSessionOptionsView: View {
 
     private var envFileField: some View {
         HStack {
+            Button("Choose…") {
+                Task {
+                    if let envFile = await chooseEnvFile() {
+                        options.envFile = envFile
+                    }
+                }
+            }
             if let envFile = options.envFile {
                 Text(displayPath(path: envFile))
                     .lineLimit(1)
@@ -197,13 +204,6 @@ struct StartSessionOptionsView: View {
             } else {
                 Text("None")
                     .foregroundStyle(.secondary)
-            }
-            Button("Choose…") {
-                Task {
-                    if let envFile = await chooseEnvFile() {
-                        options.envFile = envFile
-                    }
-                }
             }
         }
     }
@@ -318,25 +318,40 @@ struct StartSessionOptionsView: View {
 
     private var advancedOptions: some View {
         Grid(alignment: .leading, verticalSpacing: 12) {
-            optionRow(title: "Model") {
+            optionRow(title: "Model:") {
                 TextField("Model", text: $options.model)
                     .labelsHidden()
                     .frame(width: 200)
             }
-            optionRow(title: "CPUs") {
-                Stepper(
-                    value: $options.cpus,
-                    in: 1...max(
-                        ProcessInfo.processInfo.activeProcessorCount,
-                        options.cpus,
-                    ),
-                ) {
-                    Text("\(options.cpus)")
-                        .monospacedDigit()
+            optionRow(title: "CPUs:") {
+                HStack(spacing: 4) {
+                    TextField(
+                        "CPUs",
+                        value: $options.cpus,
+                        format: .number,
+                    )
+                    .labelsHidden()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 40)
+                    Stepper(
+                        "CPUs",
+                        value: $options.cpus,
+                        in: 1...max(
+                            ProcessInfo.processInfo.activeProcessorCount,
+                            options.cpus,
+                        ),
+                    )
+                    .labelsHidden()
                 }
-                .fixedSize()
+                // Typed values below 1 aren't valid; the stepper keeps to
+                // its range, but the text field doesn't.
+                .onChange(of: options.cpus) {
+                    if options.cpus < 1 {
+                        options.cpus = 1
+                    }
+                }
             }
-            optionRow(title: "Memory") {
+            optionRow(title: "Memory:") {
                 TextField(
                     "Memory",
                     text: $options.memory,
@@ -345,12 +360,9 @@ struct StartSessionOptionsView: View {
                 .labelsHidden()
                 .frame(width: 80)
             }
-            optionRow(title: "") {
+            optionRow(title: "Copy host Claude settings?") {
                 Toggle(
-                    """
-                    Copy host Claude settings. Only applies to newly-created \
-                    sessions.
-                    """,
+                    "Copy host Claude settings?",
                     isOn: Binding(
                         get: { !options.noClaudeSettings },
                         set: { isOn in
@@ -358,6 +370,7 @@ struct StartSessionOptionsView: View {
                         },
                     ),
                 )
+                .labelsHidden()
             }
         }
     }

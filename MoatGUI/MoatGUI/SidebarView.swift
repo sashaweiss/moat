@@ -17,6 +17,8 @@ struct SidebarView: View {
         ) { session in
             let status = model.status(workspace: session.workspace)
             SessionRow(session: session, status: status)
+                // Disable "type to select".
+                .typeSelectEquivalent("")
                 .contextMenu {
                     Button("Start…") {
                         startSession(session.workspace)

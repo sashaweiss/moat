@@ -120,15 +120,19 @@ public struct GuestVM: Sendable {
             try Self.writeJSON(claudeJSON, to: claudeJSONFile)
         }
 
-        // Likewise, seed a settings.json into the state directory, which is
-        // mounted at ~/.claude. Use the host's ~/.claude/settings.json if
-        // present.
+        // Write a settings.json into the state directory, which is mounted at
+        // ~/.claude. When "copy host Claude settings" is enabled we overwrite
+        // on start; otherwise, only written if not yet existing.
         let claudeSettingsFile = stateDirectory.appendingPathComponent("settings.json")
-        if !fileManager.fileExists(atPath: claudeSettingsFile.path) {
+        let copiesHostClaudeSettings = !options.noClaudeSettings
+        if
+            copiesHostClaudeSettings
+                || !fileManager.fileExists(atPath: claudeSettingsFile.path)
+        {
             var claudeSettings: [String: Any] = [:]
             let hostClaudeSettingsFile = claudeDirectory.appendingPathComponent("settings.json")
             if
-                !options.noClaudeSettings,
+                copiesHostClaudeSettings,
                 fileManager.fileExists(atPath: hostClaudeSettingsFile.path)
             {
                 let data = try Data(contentsOf: hostClaudeSettingsFile)
