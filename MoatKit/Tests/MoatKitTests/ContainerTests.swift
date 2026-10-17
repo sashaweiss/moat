@@ -44,12 +44,69 @@ struct ContainerTests {
                 ),
         )
         #expect(commands.stopVM(spec()) == ["/bin/container", "stop", "moat.ws"])
-        #expect(commands.listRunningVMs == ["/bin/container", "list", "--quiet"])
         #expect(
-            commands.listImages
+            commands.listRunningVMs.command
+                == ["/bin/container", "list", "--quiet"],
+        )
+        #expect(
+            commands.listImages.command
                 == ["/bin/container", "image", "list", "--format", "json"],
         )
         #expect(commands.gitPath == "/opt/bin/git")
+    }
+
+    @Test
+    func runningVMNames() {
+        let output = Data(" moat.a\n\nmoat.b \n".utf8)
+        #expect(
+            Container.runningVMNames(output: output) == ["moat.a", "moat.b"],
+        )
+    }
+
+    @Test
+    func imageNames() throws {
+        // Abridged from `container image list --format json`.
+        let output = Data(#"""
+        [
+            {
+                "configuration": {
+                    "creationDate": "2026-10-05T00:00:00Z",
+                    "descriptor": {
+                        "digest": "sha256:7c7b2c96",
+                        "mediaType": "application/vnd.oci.image.index.v1+json",
+                        "size": 5651
+                    },
+                    "name": "docker.io/library/debian:bookworm-slim"
+                },
+                "id": "7c7b2c96",
+                "variants": [{"digest": "sha256:a1b86db5", "size": 28138688}]
+            },
+            {
+                "configuration": {
+                    "descriptor": {
+                        "annotations": {
+                            "com.apple.containerization.image.name": "moat:base"
+                        }
+                    },
+                    "name": "moat:base"
+                },
+                "id": "9332d539",
+                "variants": []
+            }
+        ]
+        """#.utf8)
+        #expect(
+            try Container.imageNames(output: output)
+                == ["docker.io/library/debian:bookworm-slim", "moat:base"],
+        )
+    }
+
+    @Test
+    func imageNamesFailsOnUnexpectedOutput() {
+        let output = Data(#"[{"name": "moat:base"}]"#.utf8)
+        #expect(throws: DecodingError.self) {
+            try Container.imageNames(output: output)
+        }
     }
 
     @Test

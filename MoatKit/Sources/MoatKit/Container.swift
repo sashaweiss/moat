@@ -11,10 +11,44 @@ public enum Container {
             startSystem: [executable, "system", "start"],
             startVM: { spec in startCommand(spec: spec, executable: executable) },
             stopVM: { spec in stopCommand(spec: spec, executable: executable) },
-            listRunningVMs: [executable, "list", "--quiet"],
-            listImages: [executable, "image", "list", "--format", "json"],
+            listRunningVMs: HostQuery(
+                command: [executable, "list", "--quiet"],
+                parse: runningVMNames(output:),
+            ),
+            listImages: HostQuery(
+                command: [executable, "image", "list", "--format", "json"],
+                parse: imageNames(output:),
+            ),
             gitPath: settings.gitPath,
         )
+    }
+
+    /// Returns the names of the running VMs in `output` from `container list
+    /// --quiet`: one per line.
+    static func runningVMNames(output: Data) -> Set<String> {
+        Set(
+            String(decoding: output, as: UTF8.self)
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty },
+        )
+    }
+
+    /// An image, as `container image list --format json` prints it.
+    private struct ListedImage: Decodable {
+        struct Configuration: Decodable {
+            let name: String
+        }
+
+        let configuration: Configuration
+    }
+
+    /// Returns the names of the images in `output` from `container image list
+    /// --format json`.
+    static func imageNames(output: Data) throws -> [String] {
+        try JSONDecoder()
+            .decode([ListedImage].self, from: output)
+            .map(\.configuration.name)
     }
 
     /// Returns the command (starting with `executable`) that stops `spec`'s

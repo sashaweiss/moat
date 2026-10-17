@@ -10,7 +10,8 @@ struct SessionManagerTests {
         fixture = try Fixture()
     }
 
-    /// A manager using the given commands.
+    /// A manager using the given commands, whose listings are parsed as
+    /// `container`'s are.
     func sessionManager(
         checkSystem: [String] = ["/usr/bin/true"],
         startSystem: [String] = ["/usr/bin/false"],
@@ -26,8 +27,14 @@ struct SessionManagerTests {
                 startSystem: startSystem,
                 startVM: startVM,
                 stopVM: stopVM,
-                listRunningVMs: listRunningVMs,
-                listImages: listImages,
+                listRunningVMs: HostQuery(
+                    command: listRunningVMs,
+                    parse: Container.runningVMNames(output:),
+                ),
+                listImages: HostQuery(
+                    command: listImages,
+                    parse: Container.imageNames(output:),
+                ),
                 gitPath: "/usr/bin/git",
             ),
         )

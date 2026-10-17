@@ -283,35 +283,10 @@ public final class SessionManager {
             return
         }
 
-        let result = try await Subprocess.run(
-            .moatCommand(commands.listRunningVMs),
-            output: .string(limit: 1 << 20),
-        )
-        guard result.terminationStatus.isSuccess else {
-            throw MoatError.commandFailed(
-                commands.listRunningVMs,
-                status: result.terminationStatus,
-            )
-        }
-
         runningVMsSnapshot = RunningVMsSnapshot(
-            names: Set(
-                result.standardOutput
-                    .split(separator: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty },
-            ),
+            names: try await commands.listRunningVMs.run(),
             date: date,
         )
-    }
-
-    /// An image, as `listImages` prints it.
-    private struct ListedImage: Decodable {
-        struct Configuration: Decodable {
-            let name: String
-        }
-
-        let configuration: Configuration
     }
 
     /// Returns the names of moat's images (those in the `moat` repository,
@@ -322,20 +297,7 @@ public final class SessionManager {
             return []
         }
 
-        let result = try await Subprocess.run(
-            .moatCommand(commands.listImages),
-            output: .data(limit: 1 << 24),
-        )
-        guard result.terminationStatus.isSuccess else {
-            throw MoatError.commandFailed(
-                commands.listImages,
-                status: result.terminationStatus,
-            )
-        }
-
-        return try JSONDecoder()
-            .decode([ListedImage].self, from: result.standardOutput)
-            .map(\.configuration.name)
+        return try await commands.listImages.run()
             .filter { $0.hasPrefix("moat:") }
             .sorted { first, second in
                 first.localizedStandardCompare(second) == .orderedAscending
