@@ -35,24 +35,15 @@ public final class SettingsManager {
 
     /// Reload this `SettingsManager` with the current contents of `settings.json`.
     public func load() throws {
-        struct SettingsFile: Decodable {
-            // Optional, since synthesized decoding doesn't use defaults.
-            var sessionDefaults: SessionOptions?
-        }
-
         let file = environment.settingsFile
-        var hostSettings = HostSettings()
-        var sessionOptions = SessionOptions()
+        var settings = SettingsFile()
 
         if FileManager.default.fileExists(atPath: file.path) {
             let data = try Data(contentsOf: file)
             do {
                 let decoder = JSONDecoder()
                 decoder.allowsJSON5 = true
-                hostSettings = try decoder.decode(HostSettings.self, from: data)
-                sessionOptions = try decoder
-                    .decode(SettingsFile.self, from: data)
-                    .sessionDefaults ?? SessionOptions()
+                settings = try decoder.decode(SettingsFile.self, from: data)
             } catch {
                 throw MoatError.invalidSettingsFile(
                     file.path,
@@ -61,8 +52,79 @@ public final class SettingsManager {
             }
         }
 
-        self.hostSettings = hostSettings
-        self.sessionOptions = sessionOptions
+        hostSettings = settings.hostSettings
+        sessionOptions = settings.sessionDefaults
         hostCommands = Container.hostCommands(settings: hostSettings)
+    }
+
+    /// Saves `sessionOptions` as the `sessionDefaults` in `settings.json`,
+    /// with the current `hostSettings`, and uses them.
+    public func save(sessionOptions: SessionOptions) throws {
+        try write(settings: SettingsFile(
+            hostSettings: hostSettings,
+            sessionDefaults: sessionOptions,
+        ))
+        self.sessionOptions = sessionOptions
+    }
+
+    /// Saves `hostSettings` in `settings.json`, with the current
+    /// `sessionOptions`, and uses them.
+    public func save(hostSettings: HostSettings) throws {
+        try write(settings: SettingsFile(
+            hostSettings: hostSettings,
+            sessionDefaults: sessionOptions,
+        ))
+        self.hostSettings = hostSettings
+        hostCommands = Container.hostCommands(settings: hostSettings)
+    }
+
+    /// Replaces `settings.json` with `settings`.
+    private func write(settings: SettingsFile) throws {
+        try FileManager.default.createDirectory(
+            at: environment.moatDirectory,
+            withIntermediateDirectories: true,
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [
+            .prettyPrinted,
+            .sortedKeys,
+            .withoutEscapingSlashes,
+        ]
+        try encoder.encode(settings)
+            .write(to: environment.settingsFile, options: .atomic)
+    }
+}
+
+// MARK: -
+
+/// The contents of `settings.json`: `HostSettings` at the top level, and
+/// `SessionOptions` as the `sessionDefaults`.
+private struct SettingsFile: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case sessionDefaults
+    }
+
+    var hostSettings = HostSettings()
+    var sessionDefaults = SessionOptions()
+
+    init() {}
+
+    init(hostSettings: HostSettings, sessionDefaults: SessionOptions) {
+        self.hostSettings = hostSettings
+        self.sessionDefaults = sessionDefaults
+    }
+
+    init(from decoder: any Decoder) throws {
+        hostSettings = try HostSettings(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionDefaults = try container
+            .decodeIfPresent(SessionOptions.self, forKey: .sessionDefaults)
+            ?? sessionDefaults
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        try hostSettings.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionDefaults, forKey: .sessionDefaults)
     }
 }

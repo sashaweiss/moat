@@ -154,22 +154,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
                     guard let sheet else {
                         return nil
                     }
-                    return await Self.choosePaths(
-                        window: sheet,
-                        directories: false,
-                        message:
-                        "Choose a file of KEY=VALUE environment variables.",
-                    ).first
+                    return await NSOpenPanel.chooseEnvFile(window: sheet)
                 },
                 chooseSkills: { [weak sheet] in
                     guard let sheet else {
                         return []
                     }
-                    return await Self.choosePaths(
-                        window: sheet,
-                        directories: true,
-                        message: "Choose skill folders to add to the session.",
-                    )
+                    return await NSOpenPanel.chooseSkills(window: sheet)
                 },
                 finish: { [weak window, weak sheet] chosenOptions in
                     options = chosenOptions
@@ -182,28 +173,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
 
         _ = await window.beginSheet(sheet)
         return options
-    }
-
-    /// Shows an open panel as a sheet on `window`, asking for files, or for
-    /// folders (several at once) if `directories` is true, and returns their
-    /// paths, or none if the user cancels.
-    private static func choosePaths(
-        window: NSWindow,
-        directories: Bool,
-        message: String,
-    ) async -> [String] {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = !directories
-        panel.canChooseDirectories = directories
-        panel.allowsMultipleSelection = directories
-        panel.message = message
-        let response = await panel.beginSheetModal(for: window)
-        switch response {
-        case .OK:
-            return panel.urls.map(\.path)
-        default:
-            return []
-        }
     }
 
     // MARK: -

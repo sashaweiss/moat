@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let sessionsModel: SessionsModel
 
     private var mainWindowController: MainWindowController?
+    private var settingsWindowController: SettingsWindowController?
 
     static func main() {
         let application = NSApplication.shared
@@ -102,6 +103,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
+    @objc
+    private func showSettings(_ sender: Any?) {
+        let settingsWindowController = settingsWindowController
+            ?? SettingsWindowController(
+                settingsManager: settingsManager,
+                sessionsModel: sessionsModel,
+            )
+        self.settingsWindowController = settingsWindowController
+        Task {
+            await settingsWindowController.show()
+        }
+    }
+
     /// The Moat, Edit, and Window menus.
     private func makeMainMenu() -> NSMenu {
         let appName = ProcessInfo.processInfo.processName
@@ -114,6 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ),
             keyEquivalent: "",
         )
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            withTitle: "Settings…",
+            action: #selector(showSettings(_:)),
+            keyEquivalent: ",",
+        ).target = self
         appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Quit \(appName)",

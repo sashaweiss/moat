@@ -127,4 +127,57 @@ struct SettingsManagerTests {
         #expect(settingsManager.hostSettings.gitPath == "/opt/bin/git")
         #expect(settingsManager.sessionOptions.model == "sonnet")
     }
+
+    @Test
+    func saveWritesSettingsThatLoad() throws {
+        var sessionOptions = SessionOptions()
+        sessionOptions.model = "sonnet"
+        sessionOptions.envFile = "/tokens.env"
+        var hostSettings = HostSettings()
+        hostSettings.containerPath = "/opt/bin/container"
+        try settingsManager.save(sessionOptions: sessionOptions)
+        try settingsManager.save(hostSettings: hostSettings)
+        #expect(settingsManager.sessionOptions == sessionOptions)
+        #expect(settingsManager.hostSettings == hostSettings)
+        #expect(
+            settingsManager.hostCommands.checkSystem
+                == ["/opt/bin/container", "system", "status"],
+        )
+
+        let reloaded = try SettingsManager.load(
+            environment: fixture.environment,
+        )
+        #expect(reloaded.sessionOptions == sessionOptions)
+        #expect(reloaded.hostSettings == hostSettings)
+    }
+
+    @Test
+    func saveKeepsTheOtherSettings() throws {
+        try fixture.write(
+            """
+            {
+                gitPath: "/opt/bin/git",
+                sessionDefaults: {model: "sonnet"},
+            }
+            """,
+            path: ".moat/settings.json",
+            base: fixture.home,
+        )
+        try settingsManager.load()
+
+        var sessionOptions = settingsManager.sessionOptions
+        sessionOptions.cpus = 4
+        try settingsManager.save(sessionOptions: sessionOptions)
+        var hostSettings = settingsManager.hostSettings
+        hostSettings.containerPath = "/opt/bin/container"
+        try settingsManager.save(hostSettings: hostSettings)
+
+        try settingsManager.load()
+        #expect(settingsManager.hostSettings.gitPath == "/opt/bin/git")
+        #expect(
+            settingsManager.hostSettings.containerPath == "/opt/bin/container",
+        )
+        #expect(settingsManager.sessionOptions.model == "sonnet")
+        #expect(settingsManager.sessionOptions.cpus == 4)
+    }
 }
