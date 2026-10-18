@@ -2,7 +2,7 @@ import AppKit
 import MoatKit
 
 @main
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let sessionManager: SessionManager
     private let settingsManager: SettingsManager
 
@@ -116,7 +116,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The Moat, Edit, and Window menus.
+    /// Closes the Settings window. Only the Settings window closes from the
+    /// menu, since closing the main window quits the app.
+    @objc
+    private func closeSettings(_ sender: Any?) {
+        settingsWindowController?.window?.performClose(sender)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(closeSettings(_:)):
+            settingsWindowController?.window?.isKeyWindow ?? false
+        default:
+            true
+        }
+    }
+
+    /// The Moat, File, Edit, and Window menus.
     private func makeMainMenu() -> NSMenu {
         let appName = ProcessInfo.processInfo.processName
 
@@ -140,6 +156,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q",
         )
+
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(
+            withTitle: "Close",
+            action: #selector(closeSettings(_:)),
+            keyEquivalent: "w",
+        ).target = self
 
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(
@@ -167,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.windowsMenu = windowMenu
 
         let mainMenu = NSMenu()
-        for menu in [appMenu, editMenu, windowMenu] {
+        for menu in [appMenu, fileMenu, editMenu, windowMenu] {
             let item = mainMenu.addItem(
                 withTitle: menu.title,
                 action: nil,
