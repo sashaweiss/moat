@@ -41,16 +41,20 @@ struct MoatCommand: AsyncParsableCommand {
             "skill directory to mount into the container, in addition to the host's ~/.claude/skills",
             valueName: "dir",
         ),
+        completion: .directory,
     )
     var addSkills: [String] = []
 
     @Option(help: "mount the git directory read-only or read-write (default: read)")
     var gitAccessMode: GitAccessMode?
 
-    @Option(help: ArgumentHelp(
-        "file of KEY=VALUE secrets to inject as environment variables",
-        valueName: "path",
-    ))
+    @Option(
+        help: ArgumentHelp(
+            "file of KEY=VALUE secrets to inject as environment variables",
+            valueName: "path",
+        ),
+        completion: .file(),
+    )
     var envFile: String?
 
     @Option(help: "Claude model for the session; defaults to the latest Opus (default: opus)")

@@ -71,3 +71,17 @@ For full config options, see:
 ```
 moat --help
 ```
+
+### Shell completions
+
+To generate completions for `moat` for a given shell (such as `zsh`), run:
+
+```sh
+moat --generate-completion-script <shell>
+```
+
+You can use this to add `moat` completions to your shell by adding the following to your shell config:
+
+```sh
+source <(moat --generate-completion-script <shell>)
+```
