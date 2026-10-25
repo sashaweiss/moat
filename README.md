@@ -52,6 +52,10 @@ make
 ./moat # symlink to the built product
 ```
 
+### Developing
+
+See `Moat.xcworkspace` to open all the various packages in here at once.
+
 ### Releases
 
 For releasing, see `MoatRelease/` and `make release`.
