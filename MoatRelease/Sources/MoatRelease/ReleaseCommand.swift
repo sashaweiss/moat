@@ -339,7 +339,7 @@ struct ReleaseCommand: AsyncParsableCommand {
 
     /// Builds moat for release in `buildDirectory`, and returns the binary.
     func build(repository: URL, buildDirectory: URL) async throws -> URL {
-        let moatKit = repository.appending(path: "MoatKit")
+        let moatCLI = repository.appending(path: "MoatCLI")
         let build = [
             "swift",
             "build",
@@ -348,10 +348,10 @@ struct ReleaseCommand: AsyncParsableCommand {
             "--scratch-path",
             buildDirectory.path,
         ]
-        try await runShowingOutput(build, directory: moatKit)
+        try await runShowingOutput(build, directory: moatCLI)
         let binPath = try await outputOf(
             command: build + ["--show-bin-path"],
-            directory: moatKit,
+            directory: moatCLI,
         )
         return URL(filePath: binPath).appending(path: "moat")
     }

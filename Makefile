@@ -7,15 +7,10 @@ IDENTITY := release-identity.json
 
 CONTAINER := container
 
-.PHONY: all build test release image image-swift container-system
+.PHONY: install release image image-swift container-system
 
-all: build test
-
-build:
-	swift build --package-path MoatKit -c release
-
-test:
-	swift test --package-path MoatKit
+install:
+	swift build --package-path MoatCLI -c release
 
 # Extra moat-release flags go in ARGS, e.g. `make release ARGS=--dry-run`.
 release:

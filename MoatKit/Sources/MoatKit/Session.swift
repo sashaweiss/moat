@@ -20,6 +20,16 @@ public struct TerminalSize: Equatable, Sendable {
         self.columns = columns
         self.rows = rows
     }
+
+    /// The size of `terminal`.
+    public init(terminal: FileDescriptor) throws {
+        var windowSize = winsize()
+        guard ioctl(terminal.rawValue, kTIOCGWINSZ, &windowSize) == 0 else {
+            throw Errno(rawValue: errno)
+        }
+        columns = Int(windowSize.ws_col)
+        rows = Int(windowSize.ws_row)
+    }
 }
 
 /// A running agent VM, attached to a pseudo-terminal.

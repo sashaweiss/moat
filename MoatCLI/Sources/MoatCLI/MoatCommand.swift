@@ -1,5 +1,4 @@
 import ArgumentParser
-import CMoatKit
 import Foundation
 import MoatKit
 #if canImport(System)
@@ -8,9 +7,9 @@ import System
 import SystemPackage
 #endif
 
-extension GitAccessMode: ExpressibleByArgument {}
+extension GitAccessMode: @retroactive ExpressibleByArgument {}
 
-extension Workspace: ExpressibleByArgument {
+extension Workspace: @retroactive ExpressibleByArgument {
     public init?(argument: String) {
         self.init(folder: URL(fileURLWithPath: argument))
     }
@@ -140,7 +139,7 @@ struct MoatCommand: AsyncParsableCommand {
             workspace: workspace,
             options: options,
             claudeArguments: claudeArguments,
-            size: try terminalSize(terminal: stdin),
+            size: try TerminalSize(terminal: stdin),
         )
 
         // Ignore SIGWINCH for ourselves. Instead, handle it by telling the
@@ -152,7 +151,7 @@ struct MoatCommand: AsyncParsableCommand {
         )
         windowSizeChanges.setEventHandler {
             MainActor.assumeIsolated {
-                if let size = try? terminalSize(terminal: stdin) {
+                if let size = try? TerminalSize(terminal: stdin) {
                     session.resize(size)
                 }
             }
@@ -218,18 +217,6 @@ struct MoatCommand: AsyncParsableCommand {
         }
         return options
     }
-}
-
-/// Returns the size of `terminal`.
-private func terminalSize(terminal: FileDescriptor) throws -> TerminalSize {
-    var windowSize = winsize()
-    guard ioctl(terminal.rawValue, kTIOCGWINSZ, &windowSize) == 0 else {
-        throw Errno(rawValue: errno)
-    }
-    return TerminalSize(
-        columns: Int(windowSize.ws_col),
-        rows: Int(windowSize.ws_row),
-    )
 }
 
 /// Sends what's read from `input` to `session` until there's no more.
