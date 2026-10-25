@@ -7,13 +7,20 @@ IDENTITY := release-identity.json
 
 CONTAINER := container
 
-.PHONY: install release image image-swift container-system
+.PHONY: install test release image image-swift container-system
 
 install:
 	swift build --package-path MoatCLI -c release
 
+test:
+	swift test --package-path MoatKit
+	swift test --package-path MoatCLI
+	swift test --package-path MoatRelease
+	xcodebuild build -project MoatGUI/MoatGUI.xcodeproj -scheme MoatGUI \
+		-destination platform=macOS
+
 # Extra moat-release flags go in ARGS, e.g. `make release ARGS=--dry-run`.
-release:
+release: test
 	@test -f $(IDENTITY) || { echo "missing $(IDENTITY)" >&2; exit 1; }
 	identity=$$(jq -er .signingIdentity $(IDENTITY)) && \
 	profile=$$(jq -er .notaryProfile $(IDENTITY)) && \

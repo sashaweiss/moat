@@ -36,5 +36,6 @@ let package = Package(
             ],
             plugins: ["VersionPlugin"],
         ),
+        .testTarget(name: "MoatCLITests", dependencies: ["MoatCLI"]),
     ],
 )

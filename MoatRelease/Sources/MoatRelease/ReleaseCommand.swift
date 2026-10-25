@@ -73,17 +73,6 @@ struct ReleaseCommand: AsyncParsableCommand {
             tag: tag,
         )
 
-        log("Testing")
-        try await runShowingOutput(
-            [
-                "swift",
-                "test",
-                "--scratch-path",
-                releaseDirectory.appending(path: "build/test").path,
-            ],
-            directory: repository.appending(path: "MoatKit"),
-        )
-
         let artifacts = [
             try await makeArtifact(
                 architecture: architecture,

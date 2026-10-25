@@ -22,5 +22,6 @@ let package = Package(
                 .product(name: "Subprocess", package: "swift-subprocess"),
             ],
         ),
+        .testTarget(name: "MoatReleaseTests", dependencies: ["MoatRelease"]),
     ],
 )
