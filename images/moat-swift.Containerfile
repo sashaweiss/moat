@@ -39,3 +39,20 @@ RUN cd /tmp \
     && install -D -m 0755 "$asset" /home/robot/.local/bin/swiftformat \
     && rm -f "$asset" "$asset.zip" \
     && swiftformat --version
+
+
+# Add a swift-lsp Claude plugin, backed by the sourcekit-lsp that ships with Swift. Store it outside ~/.claude, since that's managed by moat.
+ENV CLAUDE_CODE_PLUGIN_DIRS="/home/robot/.local/share/claude-plugins/swift-lsp"
+RUN mkdir -p "$CLAUDE_CODE_PLUGIN_DIRS/.claude-plugin" \
+    && jq -n '{ \
+        name: "swift-lsp", \
+        description: "Swift language server (SourceKit-LSP) for code intelligence", \
+        version: "1.0.0", \
+        lspServers: { \
+            "sourcekit-lsp": { \
+                command: "sourcekit-lsp", \
+                extensionToLanguage: { ".swift": "swift" } \
+            } \
+        } \
+    }' > "$CLAUDE_CODE_PLUGIN_DIRS/.claude-plugin/plugin.json" \
+    && claude plugin validate "$CLAUDE_CODE_PLUGIN_DIRS"
