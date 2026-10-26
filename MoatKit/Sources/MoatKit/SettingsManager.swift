@@ -78,7 +78,7 @@ public final class SettingsManager {
         hostCommands = Container.hostCommands(settings: hostSettings)
     }
 
-    /// Replaces `settings.json` with `settings`.
+    /// Replaces `settings.json` with `settings`. Follows symlinks.
     private func write(settings: SettingsFile) throws {
         try FileManager.default.createDirectory(
             at: environment.moatDirectory,
@@ -90,8 +90,8 @@ public final class SettingsManager {
             .sortedKeys,
             .withoutEscapingSlashes,
         ]
-        try encoder.encode(settings)
-            .write(to: environment.settingsFile, options: .atomic)
+        let file = Filesystem.resolveSymlinks(environment.settingsFile)
+        try encoder.encode(settings).write(to: file, options: .atomic)
     }
 }
 

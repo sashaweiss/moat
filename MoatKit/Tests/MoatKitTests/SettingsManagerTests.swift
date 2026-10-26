@@ -180,4 +180,37 @@ struct SettingsManagerTests {
         #expect(settingsManager.sessionOptions.model == "sonnet")
         #expect(settingsManager.sessionOptions.cpus == 4)
     }
+
+    @Test
+    func saveWritesThroughSymlink() throws {
+        let target = try fixture.write(
+            #"{"gitPath": "/opt/bin/git"}"#,
+            path: "dotfiles/moat-settings.json",
+            base: fixture.home,
+        )
+        let link = fixture.environment.settingsFile
+        try FileManager.default.createDirectory(
+            at: link.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+        )
+        try FileManager.default.createSymbolicLink(
+            at: link,
+            withDestinationURL: target,
+        )
+        try settingsManager.load()
+
+        var sessionOptions = settingsManager.sessionOptions
+        sessionOptions.model = "sonnet"
+        try settingsManager.save(sessionOptions: sessionOptions)
+
+        #expect(
+            try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+                == target.path,
+        )
+        let reloaded = try SettingsManager.load(
+            environment: fixture.environment,
+        )
+        #expect(reloaded.hostSettings.gitPath == "/opt/bin/git")
+        #expect(reloaded.sessionOptions.model == "sonnet")
+    }
 }
