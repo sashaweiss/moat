@@ -1,7 +1,21 @@
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl sudo ca-certificates jq zsh python3 perl \
+# The tools available in the VM.
+ARG TOOLS="\
+    ca-certificates \
+    curl \
+    fd-find \
+    git \
+    jq \
+    make \
+    perl \
+    python3 \
+    ripgrep \
+    sudo \
+    zsh \
+"
+
+RUN apt-get update && apt-get install -y --no-install-recommends $TOOLS \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/zsh robot \
