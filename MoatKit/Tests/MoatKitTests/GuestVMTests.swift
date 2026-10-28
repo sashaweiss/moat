@@ -61,7 +61,16 @@ struct GuestVMTests {
         #expect(spec.image == "moat:base")
         #expect(spec.envFile == nil)
         #expect(skills(spec: spec).isEmpty)
-        #expect(spec.command == ["claude", "--permission-mode", "auto", "--model", "opus"])
+        #expect(spec.command == [
+            "sh",
+            "-c",
+            GuestVM.launchScript,
+            "moat-launch",
+            "--permission-mode",
+            "auto",
+            "--model",
+            "opus",
+        ])
     }
 
     @Test
@@ -208,7 +217,10 @@ struct GuestVMTests {
         #expect(spec.workingDirectory == fixture.workspace.path)
         #expect(spec.envFile == nil)
         #expect(spec.command == [
-            "claude",
+            "sh",
+            "-c",
+            GuestVM.launchScript,
+            "moat-launch",
             "--permission-mode",
             "plan",
             "--model",

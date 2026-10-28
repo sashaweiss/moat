@@ -7,6 +7,20 @@ public struct GuestVM: Sendable {
     static let user = "robot"
     static let vmHomeDirectory = "/home/robot"
 
+    /// Where an image may put files to seed into the VM's home directory.
+    static let vmBootstrapDirectory = "/etc/moat/bootstrap"
+
+    /// The VM's command: bootstraps the home directory, then runs Claude with
+    /// the script's arguments.
+    static let launchScript = """
+    # Seed the image's bootstrap files, without overwriting existing ones.
+    if [ -d \(vmBootstrapDirectory) ]; then
+        cp -rn \(vmBootstrapDirectory)/. \(vmHomeDirectory)/
+    fi
+
+    exec claude "$@"
+    """
+
     public init(environment: HostEnvironment = HostEnvironment()) {
         self.environment = environment
     }
@@ -253,7 +267,10 @@ public struct GuestVM: Sendable {
             envFile: envFile,
             mounts: mounts,
             command: [
-                "claude",
+                "sh",
+                "-c",
+                Self.launchScript,
+                "moat-launch",
                 "--permission-mode",
                 options.permissionMode,
                 "--model",

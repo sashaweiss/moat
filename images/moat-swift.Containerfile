@@ -41,18 +41,35 @@ RUN cd /tmp \
     && swiftformat --version
 
 
-# Add a swift-lsp Claude plugin, backed by the sourcekit-lsp that ships with Swift. Store it outside ~/.claude, since that's managed by moat.
-ENV CLAUDE_CODE_PLUGIN_DIRS="/home/robot/.local/share/claude-plugins/swift-lsp"
-RUN mkdir -p "$CLAUDE_CODE_PLUGIN_DIRS/.claude-plugin" \
-    && jq -n '{ \
-        name: "swift-lsp", \
-        description: "Swift language server (SourceKit-LSP) for code intelligence", \
-        version: "1.0.0", \
-        lspServers: { \
-            "sourcekit-lsp": { \
-                command: "sourcekit-lsp", \
-                extensionToLanguage: { ".swift": "swift" } \
-            } \
-        } \
-    }' > "$CLAUDE_CODE_PLUGIN_DIRS/.claude-plugin/plugin.json" \
-    && claude plugin validate "$CLAUDE_CODE_PLUGIN_DIRS"
+# Seed Claude plugins outside of ~/.claude, since that's managed by moat.
+ENV CLAUDE_CODE_PLUGIN_SEED_DIR="/home/robot/.local/share/claude-plugin-seed"
+
+# Use a throwaway HOME to add the swift-lsp Claude plugin (backed by the
+# `sourcekit-lsp` that ships with Swift). This installs the actual plugin to
+# the durable SEED_DIR above, but lets us discard changes that these commands
+# make in HOME such as writing Claude configs to enable the plugin.
+RUN export HOME="$(mktemp -d)" \
+        CLAUDE_CODE_PLUGIN_CACHE_DIR="$CLAUDE_CODE_PLUGIN_SEED_DIR" \
+    && claude plugin marketplace add anthropics/claude-plugins-official \
+    && claude plugin install swift-lsp@claude-plugins-official \
+    && rm -rf "$HOME"
+
+# Enable the swift-lsp Claude plugin via managed settings, since moat manages
+# the user-level ~/.claude/settings.json.
+USER root
+RUN mkdir -p /etc/claude-code \
+    && jq -n '{ enabledPlugins: { "swift-lsp@claude-plugins-official": true } }' \
+        > /etc/claude-code/managed-settings.json
+
+# Bootstrap ~/.claude with the seed's plugin registry, so the plugin is ready
+# on a workspace's first launch. Adjust it to match how Claude Code stores
+# seeded, managed plugins, so it doesn't rewrite them and prompt for a reload.
+RUN dir=/etc/moat/bootstrap/.claude/plugins \
+    && mkdir -p "$dir" \
+    && jq 'map_values(.autoUpdate = false)' \
+        "$CLAUDE_CODE_PLUGIN_SEED_DIR/known_marketplaces.json" \
+        > "$dir/known_marketplaces.json" \
+    && jq '.plugins |= map_values(map(.scope = "managed"))' \
+        "$CLAUDE_CODE_PLUGIN_SEED_DIR/installed_plugins.json" \
+        > "$dir/installed_plugins.json"
+USER robot

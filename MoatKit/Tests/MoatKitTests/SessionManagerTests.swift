@@ -184,7 +184,7 @@ struct SessionManagerTests {
             outputBytes += chunk
         }
         let output = String(decoding: outputBytes, as: UTF8.self)
-        #expect(output.contains("moat:swift 8G claude"))
+        #expect(output.contains("moat:swift 8G sh -c"))
         #expect(output.contains("--resume"))
     }
 
