@@ -194,6 +194,52 @@ struct GuestVMTests {
     }
 
     @Test
+    func addWorkspaces() async throws {
+        let extra = try fixture.makeDirectory("extra")
+        try fixture.makeDirectory("extra/.git")
+        let spec = try await prepare(claudeArguments: ["--resume"]) {
+            $0.addWorkspaces = [extra.path]
+        }
+        let extraGit = extra.appendingPathComponent(".git")
+        #expect(spec.mounts.suffix(3).map(\.source.path) == [
+            extra.path,
+            fixture.workspace.path,
+            extraGit.path,
+        ])
+        #expect(spec.mounts.suffix(3).map(\.destination) == [
+            extra.path,
+            fixture.workspace.path,
+            extraGit.path,
+        ])
+        #expect(spec.mounts.suffix(3).map(\.access) == [
+            .readWrite,
+            .readWrite,
+            .readOnly,
+        ])
+        #expect(spec.workingDirectory == fixture.workspace.path)
+        #expect(spec.command.suffix(3) == ["--add-dir", extra.path, "--resume"])
+    }
+
+    @Test
+    func addWorkspaceMustBeADirectory() async throws {
+        let missing = fixture.root.appendingPathComponent("missing").path
+        await #expect(throws: MoatError.notADirectory(missing)) {
+            try await prepare { $0.addWorkspaces = [missing] }
+        }
+    }
+
+    @Test
+    func addWorkspacesSkipsDuplicates() async throws {
+        let extra = try fixture.makeDirectory("extra")
+        let spec = try await prepare {
+            $0.addWorkspaces = [fixture.workspace.path, extra.path, extra.path]
+        }
+        let workspaceMounts = spec.mounts.filter { !$0.destination.hasPrefix("/home/robot") }
+        #expect(workspaceMounts.map(\.destination) == [extra.path, fixture.workspace.path])
+        #expect(spec.command.filter { $0 == "--add-dir" }.count == 1)
+    }
+
+    @Test
     func vmNameReplacesDisallowedCharacters() {
         let workspace = Workspace(
             folder: URL(fileURLWithPath: "/projects/my.café_app"),

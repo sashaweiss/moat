@@ -23,7 +23,7 @@ struct MoatCommand: AsyncParsableCommand {
             abstract: "Runs Claude Code in a sandboxed VM with the given <workspace> directory mounted.",
             discussion: """
             Any additional arguments are forwarded to `claude` inside the container. \
-            Defaults may be set in \(HostEnvironment().settingsFile.path).
+            Defaults may be set in ~/.moat/settings.json.
             """,
             version: moatVersion,
         )
@@ -44,6 +44,16 @@ struct MoatCommand: AsyncParsableCommand {
         completion: .directory,
     )
     var addSkills: [String] = []
+
+    @Option(
+        name: [.customLong("add-workspace"), .customLong("aw")],
+        help: ArgumentHelp(
+            "additional directory to mount into the container and add to Claude",
+            valueName: "dir",
+        ),
+        completion: .directory,
+    )
+    var addWorkspaces: [String] = []
 
     @Option(help: "mount the git directory read-only or read-write (default: read)")
     var gitAccessMode: GitAccessMode?
@@ -88,6 +98,9 @@ struct MoatCommand: AsyncParsableCommand {
         )
 
         print("moat: run claude in \"\(workspace.name)\" with permission mode \"\(options.permissionMode)\"?")
+        for addedWorkspace in options.addWorkspaces {
+            print("Also adding workspace: \(addedWorkspace)")
+        }
         if options.gitAccessMode == .write {
             print("WARNING: claude will have write access to git!")
         }
@@ -195,6 +208,7 @@ struct MoatCommand: AsyncParsableCommand {
     func options(defaults: SessionOptions) -> SessionOptions {
         var options = defaults
         options.addSkills += addSkills
+        options.addWorkspaces += addWorkspaces
         if let permissionMode {
             options.permissionMode = permissionMode
         }

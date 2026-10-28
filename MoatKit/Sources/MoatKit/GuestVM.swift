@@ -51,6 +51,20 @@ public struct GuestVM: Sendable {
             envFile = url
         }
 
+        // Added workspaces are mounted like the workspace, but don't key the
+        // session.
+        var workspaces = [workspace]
+        for workspaceOption in options.addWorkspaces {
+            let url = URL(fileURLWithPath: NSString(string: workspaceOption).expandingTildeInPath)
+            guard Filesystem.isDirectory(url) else {
+                throw MoatError.notADirectory(workspaceOption)
+            }
+            let addedWorkspace = Workspace(folder: url)
+            if !workspaces.contains(addedWorkspace) {
+                workspaces.append(addedWorkspace)
+            }
+        }
+
         // Mount skills individually, keyed by name, so symlinked skills work.
         var skills: [(name: String, directory: URL)] = []
         for skill in try hostSkills() {
@@ -101,17 +115,21 @@ public struct GuestVM: Sendable {
         // (e.g., independent clones), since they'd otherwise be writable via
         // the workspace mount.
         var gitDirectories: [URL] = []
-        if
-            let commonDirectory = try await Git.commonDirectory(
-                workspace: workspace.url,
-                gitPath: gitPath,
-            )
-        {
-            gitDirectories.append(commonDirectory)
+        for workspace in workspaces {
+            if
+                let commonDirectory = try await Git.commonDirectory(
+                    workspace: workspace.url,
+                    gitPath: gitPath,
+                )
+            {
+                gitDirectories.append(commonDirectory)
+            }
+            gitDirectories += try Git.directories(root: workspace.url)
         }
-        for nested in try Git.directories(root: workspace.url) {
-            if !gitDirectories.contains(where: { $0.path == nested.path }) {
-                gitDirectories.append(nested)
+        var uniqueGitDirectories: [URL] = []
+        for gitDirectory in gitDirectories {
+            if !uniqueGitDirectories.contains(where: { $0.path == gitDirectory.path }) {
+                uniqueGitDirectories.append(gitDirectory)
             }
         }
 
@@ -240,16 +258,19 @@ public struct GuestVM: Sendable {
         // we'll allow git dir write access.
         //
         // Mounts nested inside other mounts must come after their parent.
-        mounts.append(Mount(
-            source: workspace.url,
-            destination: workspace.path,
-            access: .readWrite,
-        ))
+        // Sorting by path puts parents before children.
+        for workspace in workspaces.sorted(by: { $0.path < $1.path }) {
+            mounts.append(Mount(
+                source: workspace.url,
+                destination: workspace.path,
+                access: .readWrite,
+            ))
+        }
         let gitAccess: Mount.Access = switch options.gitAccessMode {
         case .read: .readOnly
         case .write: .readWrite
         }
-        for gitDirectory in gitDirectories {
+        for gitDirectory in uniqueGitDirectories {
             mounts.append(Mount(
                 source: gitDirectory,
                 destination: gitDirectory.path,
@@ -275,7 +296,8 @@ public struct GuestVM: Sendable {
                 options.permissionMode,
                 "--model",
                 options.model,
-            ] + claudeArguments,
+            ] + workspaces.dropFirst().flatMap { ["--add-dir", $0.path] }
+                + claudeArguments,
         )
     }
 
