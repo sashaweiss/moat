@@ -22,12 +22,19 @@ struct ReleaseCommand: AsyncParsableCommand {
         """,
     )
 
+    /// A Developer ID Application certificate in the keychain, made in Xcode's
+    /// Settings > Accounts > Manage Certificates. List them with `security
+    /// find-identity -v -p codesigning`.
     @Option(help: ArgumentHelp(
         "the identity to sign with, e.g. \"Developer ID Application: …\"",
         valueName: "identity",
     ))
     var signingIdentity: String
 
+    /// Credentials saved to the keychain under a profile name with `xcrun
+    /// notarytool store-credentials <profile> --apple-id <email> --team-id
+    /// <team>`, which asks for an app-specific password. Check one with `xcrun
+    /// notarytool history --keychain-profile <profile>`.
     @Option(help: ArgumentHelp(
         "the notarytool keychain profile to notarize with",
         valueName: "profile",
@@ -48,6 +55,9 @@ struct ReleaseCommand: AsyncParsableCommand {
 
     @Flag(help: "do everything but tag and publish")
     var dryRun = false
+
+    @Flag(help: "show the output of each step's commands")
+    var verbose = false
 
     func run() async throws {
         let repository = URL(
@@ -71,6 +81,13 @@ struct ReleaseCommand: AsyncParsableCommand {
             repository: repository,
             remote: remote,
             tag: tag,
+        )
+
+        log("Testing")
+        try await runCommand(
+            ["make", "test"],
+            directory: repository,
+            verbose: verbose,
         )
 
         let artifacts = [
@@ -147,7 +164,7 @@ struct ReleaseCommand: AsyncParsableCommand {
             path: "moat-\(version)-macos-\(architecture).zip",
         )
         try? FileManager.default.removeItem(at: zip)
-        try await runShowingOutput([
+        try await runCommand([
             "ditto",
             "-c",
             "-k",
@@ -157,7 +174,7 @@ struct ReleaseCommand: AsyncParsableCommand {
             "--norsrc",
             signedBinary.path,
             zip.path,
-        ])
+        ], verbose: verbose)
         try await notarize(zip: zip)
 
         return Artifact(zip: zip, checksum: try await writeChecksum(zip: zip))
@@ -184,20 +201,22 @@ struct ReleaseCommand: AsyncParsableCommand {
             .sorted()
 
         log("Tagging \(tag)")
-        try await runShowingOutput(
+        try await runCommand(
             ["git", "tag", "-a", tag, "-m", "moat \(version)"],
             directory: repository,
+            verbose: verbose,
         )
-        try await runShowingOutput(
+        try await runCommand(
             ["git", "push", remote, tag],
             directory: repository,
+            verbose: verbose,
         )
 
         log("Creating a draft GitHub release")
         let files = artifacts.flatMap { artifact in
             [artifact.zip.path, artifact.checksum.path]
         } + containerfiles
-        try await runShowingOutput(
+        try await runCommand(
             ["gh", "release", "create", tag]
                 + files
                 + [
@@ -207,6 +226,7 @@ struct ReleaseCommand: AsyncParsableCommand {
                     "--generate-notes",
                 ],
             directory: repository,
+            verbose: verbose,
         )
     }
 
@@ -233,6 +253,7 @@ struct ReleaseCommand: AsyncParsableCommand {
         let directories = path.split(separator: ":").map(String.init)
         let tools = [
             "git",
+            "make",
             "swift",
             "lipo",
             "codesign",
@@ -337,7 +358,7 @@ struct ReleaseCommand: AsyncParsableCommand {
             "--scratch-path",
             buildDirectory.path,
         ]
-        try await runShowingOutput(build, directory: moatCLI)
+        try await runCommand(build, directory: moatCLI, verbose: verbose)
         let binPath = try await outputOf(
             command: build + ["--show-bin-path"],
             directory: moatCLI,
@@ -360,7 +381,7 @@ struct ReleaseCommand: AsyncParsableCommand {
 
     /// Signs `binary` for notarization, and verifies it.
     func sign(binary: URL) async throws {
-        try await runShowingOutput([
+        try await runCommand([
             "codesign",
             "--sign",
             signingIdentity,
@@ -369,29 +390,31 @@ struct ReleaseCommand: AsyncParsableCommand {
             "--timestamp",
             "--force",
             binary.path,
-        ])
-        try await runShowingOutput([
+        ], verbose: verbose)
+        try await runCommand([
             "codesign",
             "--verify",
             "--strict",
             "--verbose=2",
             binary.path,
-        ])
+        ], verbose: verbose)
     }
 
     /// Submits `zip` for notarization, and waits for it to be accepted.
     func notarize(zip: URL) async throws {
-        let submission = try await outputOf(command: [
-            "xcrun",
-            "notarytool",
-            "submit",
-            zip.path,
-            "--keychain-profile",
-            notaryProfile,
-            "--wait",
-            "--output-format",
-            "json",
-        ])
+        let submission = try await withProgressDots {
+            try await outputOf(command: [
+                "xcrun",
+                "notarytool",
+                "submit",
+                zip.path,
+                "--keychain-profile",
+                notaryProfile,
+                "--wait",
+                "--output-format",
+                "json",
+            ])
+        }
         struct Submission: Decodable {
             var id: String
             var status: String
@@ -401,14 +424,14 @@ struct ReleaseCommand: AsyncParsableCommand {
             from: Data(submission.utf8),
         )
         guard result.status == "Accepted" else {
-            try? await runShowingOutput([
+            try? await runCommand([
                 "xcrun",
                 "notarytool",
                 "log",
                 result.id,
                 "--keychain-profile",
                 notaryProfile,
-            ])
+            ], verbose: verbose)
             throw ReleaseError("Notarization ended as \(result.status).")
         }
     }

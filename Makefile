@@ -17,14 +17,18 @@ test:
 	swift test --package-path MoatCLI
 	swift test --package-path MoatRelease
 	xcodebuild build -project MoatGUI/MoatGUI.xcodeproj -scheme MoatGUI \
-		-destination platform=macOS
+		-destination platform=macOS -skipPackagePluginValidation
+
+# Set VERBOSE (e.g., `make release VERBOSE=1`) to show each step's output.
+VERBOSE :=
 
 # Extra moat-release flags go in ARGS, e.g. `make release ARGS=--dry-run`.
-release: test
+release:
 	@test -f $(IDENTITY) || { echo "missing $(IDENTITY)" >&2; exit 1; }
-	identity=$$(jq -er .signingIdentity $(IDENTITY)) && \
+	@identity=$$(jq -er .signingIdentity $(IDENTITY)) && \
 	profile=$$(jq -er .notaryProfile $(IDENTITY)) && \
-	swift run --package-path MoatRelease moat-release \
+	swift run $(if $(VERBOSE),,--quiet) --package-path MoatRelease \
+		moat-release $(if $(VERBOSE),--verbose) \
 		--signing-identity "$$identity" --notary-profile "$$profile" \
 		$(ARGS)
 
