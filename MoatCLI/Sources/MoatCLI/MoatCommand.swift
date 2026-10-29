@@ -32,9 +32,6 @@ struct MoatCommand: AsyncParsableCommand {
     @Argument(help: "directory to mount as the workspace in the container")
     var workspace: Workspace
 
-    @Option(help: "Claude Code permission mode (default: auto)")
-    var permissionMode: String?
-
     @Option(
         name: .customLong("add-skill"),
         help: ArgumentHelp(
@@ -55,8 +52,14 @@ struct MoatCommand: AsyncParsableCommand {
     )
     var addWorkspaces: [String] = []
 
-    @Option(help: "mount the git directory read-only or read-write (default: read)")
-    var gitAccessMode: GitAccessMode?
+    @Flag(
+        inversion: .prefixedNo,
+        help: "copy the host's ~/.claude/settings.json and CLAUDE.md into the session (default: true)",
+    )
+    var copyHostClaudeConfigs: Bool?
+
+    @Option(help: "number of CPUs for the VM (default: 2)")
+    var cpus: Int?
 
     @Option(
         help: ArgumentHelp(
@@ -67,23 +70,20 @@ struct MoatCommand: AsyncParsableCommand {
     )
     var envFile: String?
 
-    @Option(help: "Claude model for the session; defaults to the latest Opus (default: opus)")
-    var model: String?
-
-    @Option(help: "number of CPUs for the VM (default: 2)")
-    var cpus: Int?
-
-    @Option(help: "memory for the VM, e.g. 8G (default: 4G)")
-    var memory: String?
+    @Option(help: "mount the git directory read-only or read-write (default: read)")
+    var gitAccessMode: GitAccessMode?
 
     @Option(help: "image to run in the VM (default: moat:base)")
     var image: String?
 
-    @Flag(
-        inversion: .prefixedNo,
-        help: "copy the host's ~/.claude/settings.json and CLAUDE.md into the session (default: true)",
-    )
-    var copyHostClaudeConfigs: Bool?
+    @Option(help: "memory for the VM, e.g. 8G (default: 4G)")
+    var memory: String?
+
+    @Option(help: "Claude model for the session; defaults to the latest Opus (default: opus)")
+    var model: String?
+
+    @Option(help: "Claude Code permission mode (default: auto)")
+    var permissionMode: String?
 
     @Argument(parsing: .allUnrecognized, help: .hidden)
     var claudeArguments: [String] = []
@@ -209,29 +209,29 @@ struct MoatCommand: AsyncParsableCommand {
         var options = defaults
         options.addSkills += addSkills
         options.addWorkspaces += addWorkspaces
-        if let permissionMode {
-            options.permissionMode = permissionMode
-        }
-        if let gitAccessMode {
-            options.gitAccessMode = gitAccessMode
-        }
-        if let envFile {
-            options.envFile = envFile
-        }
-        if let model {
-            options.model = model
+        if let copyHostClaudeConfigs {
+            options.copyHostClaudeConfigs = copyHostClaudeConfigs
         }
         if let cpus {
             options.cpus = cpus
         }
-        if let memory {
-            options.memory = memory
+        if let envFile {
+            options.envFile = envFile
+        }
+        if let gitAccessMode {
+            options.gitAccessMode = gitAccessMode
         }
         if let image {
             options.image = image
         }
-        if let copyHostClaudeConfigs {
-            options.copyHostClaudeConfigs = copyHostClaudeConfigs
+        if let memory {
+            options.memory = memory
+        }
+        if let model {
+            options.model = model
+        }
+        if let permissionMode {
+            options.permissionMode = permissionMode
         }
         return options
     }
