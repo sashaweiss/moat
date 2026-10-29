@@ -325,7 +325,10 @@ struct ReleaseCommand: AsyncParsableCommand {
         }
 
         guard try await git(["tag", "--list", tag]).isEmpty else {
-            throw ReleaseError("The tag \(tag) already exists.")
+            throw ReleaseError(
+                "The tag \(tag) already exists; bump MARKETING_VERSION in "
+                    + "Version.xcconfig.",
+            )
         }
 
         let releaseTags = try await outputOf(
@@ -343,7 +346,10 @@ struct ReleaseCommand: AsyncParsableCommand {
             directory: repository,
         )
         guard !releaseTags.split(separator: "\n").contains(Substring(tag)) else {
-            throw ReleaseError("A GitHub release for \(tag) already exists.")
+            throw ReleaseError(
+                "A GitHub release for \(tag) already exists; bump "
+                    + "MARKETING_VERSION in Version.xcconfig.",
+            )
         }
     }
 
